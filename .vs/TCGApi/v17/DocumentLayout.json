@@ -1,9 +1,9 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Users\\admin\\source\\repos\\TCGApi\\",
+  "WorkspaceRootPath": "D:\\Unity Projects\\Github\\TCGApi\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|c:\\users\\admin\\source\\repos\\tcgapi\\tcgapi\\app.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
+      "AbsoluteMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|d:\\unity projects\\github\\tcgapi\\tcgapi\\app.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
       "RelativeMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|solutionrelative:tcgapi\\app.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
     }
   ],
@@ -20,9 +20,9 @@
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "app.js",
-              "DocumentMoniker": "C:\\Users\\admin\\source\\repos\\TCGApi\\TCGApi\\app.js",
+              "DocumentMoniker": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\app.js",
               "RelativeDocumentMoniker": "TCGApi\\app.js",
-              "ToolTip": "C:\\Users\\admin\\source\\repos\\TCGApi\\TCGApi\\app.js",
+              "ToolTip": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\app.js",
               "RelativeToolTip": "TCGApi\\app.js",
               "ViewState": "AgIAAAwAAAAAAAAAAAAAAC8BAAADAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",

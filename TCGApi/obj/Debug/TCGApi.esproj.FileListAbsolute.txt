@@ -1,1 +1,2 @@
 C:\Users\admin\source\repos\TCGApi\TCGApi\obj\Debug\TCGApi.esproj.CoreCompileInputs.cache
+D:\Unity Projects\Github\TCGApi\TCGApi\obj\Debug\TCGApi.esproj.CoreCompileInputs.cache
