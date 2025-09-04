@@ -305,7 +305,7 @@ app.post('/users/cards/sell/:userID', async (req, res) => {
 
 
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
+    console.log(`Example app listening on port ${port} with URI ${uri}`)
 })
 
 async function ReadUser(response, username) {
