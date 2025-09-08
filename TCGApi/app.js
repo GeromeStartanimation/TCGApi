@@ -1,11 +1,11 @@
 ﻿const express = require('express')
 const app = express()
 app.use(express.json())
-const port = process.env.PORT || 3000
+const port = 3000
 
 const { MongoClient } = require("mongodb");
 // Replace the uri string with your connection string
-const uri = process.env.DB || "mongodb://localhost:27017/";
+const uri = "mongodb://localhost:27017/";
 const client = new MongoClient(uri);
 
 const database = client.db('tcg');
@@ -20,7 +20,7 @@ app.get('/users/:username', async (request, response) => {
         await ReadUser(response, username);
     }
 
-    catch (error){
+    catch (error) {
 
         console.log(error.message);
 
@@ -64,6 +64,61 @@ app.post('/users/create', async (request, response) => {
     }
 
 })
+
+app.post('/users/edit/:userID', async (request, response) => {
+    try {
+
+        const userID = request.params.userID;
+        let { avatar, cardback } = request.body; // edit user avatar or cardback
+
+        console.log("Editing " + userID + "properties");
+
+        // Build dynamic update object
+        const updateFields = {};
+        if (avatar) updateFields.avatar = avatar;
+        if (cardback) updateFields.cardback = cardback;
+
+        if (Object.keys(updateFields).length === 0) {
+            return response.status(400).json({
+                success: false,
+                status: 400,
+                data: "",
+                error: "No fields to update"
+            });
+        }
+
+        const result = await users.updateOne(
+            { id: userID },
+            { $set: updateFields }
+        );
+
+        if (result.matchedCount === 0) {
+            return response.status(404).json({
+                success: false,
+                status: 404,
+                data: "",
+                error: "No User Found"
+            });
+        }
+
+        return response.json({
+            success: true,
+            status: 200,
+            data: updateFields,
+            message: "User updated successfully"
+        });
+    }
+    catch (error) {
+        console.log(error.message);
+        return response.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database Error"
+        });
+    }
+});
+
 
 app.post('/users/rewards/gain/:userID', async (req, res) => {
     try {
@@ -175,6 +230,11 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 { id: userID },
                 { $set: { cards: existing, decks: newDecks } },
                 { new: true }
+            );
+
+            const result = await users.updateOne(
+                { id: userID },
+                { $addToSet: { rewards: "starter_deck" } } // only adds if it doesn't already exist
             );
 
             return res.json({ success: true, status: 200, data: updatedUser, error: "" });
@@ -345,33 +405,86 @@ app.post('/users/packs/buy/:userID', async (req, res) => {
     }
 });
 
-/// POST /users/packs/open/:userID
-// Body: { pack: "starter_pack", cards: [ { tid, variant, quantity }, ... ] }
 app.post('/users/packs/open/:userID', async (req, res) => {
     try {
-        const userID = request.params.userID;
+        const userID = req.params.userID;
+        const { pack } = req.body;
 
+        if (!pack || typeof pack !== 'string') {
+            return res.status(400).json({
+                success: false,
+                status: 400,
+                data: "",
+                error: "Invalid request: 'pack' is required"
+            });
+        }
+
+        // --- load user ---
         const user = await users.findOne({ id: userID });
         if (!user) {
-            return res.status(404).json({ success: false, status: 404, data: "", error: "No User Found" });
-        }
-        else {
-            console.log(user.username);
+            return res.status(404).json({
+                success: false,
+                status: 404,
+                data: "",
+                error: "No User Found"
+            });
         }
 
-    } catch (error) {
-        console.log(error.message);
-        return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
+        console.log("User:", user.username);
+
+        // --- find pack ---
+        let packs = Array.isArray(user.packs) ? [...user.packs] : [];
+        const idx = packs.findIndex(p => p.tid === pack);
+
+        if (idx < 0) {
+            return res.status(400).json({
+                success: false,
+                status: 400,
+                data: "",
+                error: "Pack not found in inventory"
+            });
+        }
+
+        if ((packs[idx].quantity || 0) <= 0) {
+            return res.status(400).json({
+                success: false,
+                status: 400,
+                data: "",
+                error: "No packs left to open"
+            });
+        }
+
+        // --- reduce by 1 ---
+        packs[idx].quantity -= 1;
+
+        // --- update DB ---
+        await users.updateOne(
+            { id: userID },
+            { $set: { packs } }
+        );
+
+        return res.json({
+            success: true,
+            status: 200,
+            data: { pack, remaining: packs[idx].quantity },
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("Open Pack Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database Error"
+        });
     }
 });
 
 
 
-
-
-
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port} with URI ${uri}`)
+    console.log(`Example app listening on port ${port}`)
 })
 
 async function ReadUser(response, username) {
