@@ -1,4 +1,4 @@
-const express = require('express')
+﻿const express = require('express')
 const app = express()
 app.use(express.json())
 const port = process.env.PORT || 3000
@@ -302,6 +302,72 @@ app.post('/users/cards/sell/:userID', async (req, res) => {
         return res.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
     }
 });
+
+// POST /users/packs/buy/:userID
+app.post('/users/packs/buy/:userID', async (req, res) => {
+    try {
+        const userID = req.params.userID;
+        let { pack, variant, quantity, totalCost } = req.body;
+
+        // minimal validation
+        if (!pack || typeof pack !== 'string') {
+            return res.status(400).json({ success: false, status: 400, data: "", error: "Missing or invalid 'pack'" });
+        }
+        variant = (typeof variant === 'string') ? variant : "";
+        quantity = parseInt(quantity, 10);
+        if (isNaN(quantity) || quantity <= 0) quantity = 1;
+        totalCost = Number(totalCost) || 0; // trusted from client
+
+        const user = await users.findOne({ id: userID });
+        if (!user) {
+            return res.status(404).json({ success: false, status: 404, data: "", error: "No User Found" });
+        }
+
+        // adjust coins (no server-side price check)
+        const newCoins = (Number(user.coins) || 0) - totalCost;
+
+        // merge pack into user.packs as { tid, variant, quantity }
+        const packs = Array.isArray(user.packs) ? [...user.packs] : [];
+        const idx = packs.findIndex(p => p.tid === pack && ((p.variant ?? "") === variant));
+        if (idx >= 0) packs[idx].quantity = (packs[idx].quantity || 0) + quantity;
+        else packs.push({ tid: pack, variant, quantity });
+
+        const updatedUser = await users.findOneAndUpdate(
+            { id: userID },
+            { $set: { coins: newCoins, packs } },
+            { new: true }
+        );
+
+        return res.json({ success: true, status: 200, data: updatedUser, error: "" });
+    } catch (err) {
+        console.error("Buy pack error:", err);
+        return res.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
+    }
+});
+
+/// POST /users/packs/open/:userID
+// Body: { pack: "starter_pack", cards: [ { tid, variant, quantity }, ... ] }
+app.post('/users/packs/open/:userID', async (req, res) => {
+    try {
+        const userID = request.params.userID;
+
+        const user = await users.findOne({ id: userID });
+        if (!user) {
+            return res.status(404).json({ success: false, status: 404, data: "", error: "No User Found" });
+        }
+        else {
+            console.log(user.username);
+        }
+
+    } catch (error) {
+        console.log(error.message);
+        return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
+    }
+});
+
+
+
+
 
 
 app.listen(port, () => {
