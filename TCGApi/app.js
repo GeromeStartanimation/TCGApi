@@ -120,6 +120,86 @@ app.post('/users/edit/:userID', async (request, response) => {
 });
 
 
+// Save or update a user deck
+app.post('/users/deck/:userID', async (req, res) => {
+    try {
+        const userID = req.params.userID;
+        const deckData = req.body;
+
+        console.log(`[SaveDeckAPI] Incoming request for userID=${userID}`);
+        console.log(`[SaveDeckAPI] Deck payload: ${JSON.stringify(deckData)}`);
+
+        const user = await users.findOne({ id: userID });
+        if (!user) {
+            console.warn(`[SaveDeckAPI] User not found: ${userID}`);
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+
+        const decks = Array.isArray(user.decks) ? [...user.decks] : [];
+        const idx = decks.findIndex(d => d.tid === deckData.tid);
+
+        if (idx >= 0) {
+            console.log(`[SaveDeckAPI] Updating existing deck tid=${deckData.tid}`);
+            decks[idx] = deckData;
+        } else {
+            console.log(`[SaveDeckAPI] Adding new deck tid=${deckData.tid}`);
+            decks.push(deckData);
+        }
+
+        await users.updateOne({ id: userID }, { $set: { decks } });
+        console.log(`[SaveDeckAPI] Saved decks for userID=${userID}, total decks=${decks.length}`);
+
+        return res.json({ success: true, data: decks });
+    } catch (err) {
+        console.error(`[SaveDeckAPI] Error: ${err.message}`);
+        return res.status(500).json({ success: false, error: "Database error" });
+    }
+});
+
+// Delete a user deck
+app.delete('/users/deck/:userID', async (req, res) => {
+    try {
+        const userID = req.params.userID;
+        const { tid } = req.body; // deck_tid sent in body
+
+        if (!tid) {
+            return res.status(400).json({ success: false, error: "Missing deck tid" });
+        }
+
+        console.log(`[DeleteDeckAPI] Request to delete deck tid=${tid} for user=${userID}`);
+
+        // Validate user
+        const user = await users.findOne({ id: userID });
+        if (!user) {
+            console.warn(`[DeleteDeckAPI] User not found: ${userID}`);
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+
+        // Remove the deck with matching tid
+        const updated = await users.updateOne(
+            { id: userID },
+            { $pull: { decks: { tid } } }   // <- removes deck object with matching tid
+        );
+
+        if (updated.modifiedCount === 0) {
+            console.warn(`[DeleteDeckAPI] No deck found with tid=${tid} for user=${userID}`);
+            return res.status(404).json({ success: false, error: "Deck not found" });
+        }
+
+        console.log(`[DeleteDeckAPI] Deck tid=${tid} deleted for user=${userID}`);
+
+        // Return updated decks array
+        const freshUser = await users.findOne({ id: userID }, { projection: { decks: 1 } });
+        return res.json({ success: true, data: freshUser.decks });
+    } catch (err) {
+        console.error(`[DeleteDeckAPI] Error: ${err.message}`);
+        return res.status(500).json({ success: false, error: "Database error" });
+    }
+});
+
+
+
+
 app.post('/users/rewards/gain/:userID', async (req, res) => {
     try {
         const userID = req.params.userID;
@@ -362,6 +442,8 @@ app.post('/users/cards/sell/:userID', async (req, res) => {
         return res.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
     }
 });
+
+
 
 // POST /users/packs/buy/:userID
 app.post('/users/packs/buy/:userID', async (req, res) => {
