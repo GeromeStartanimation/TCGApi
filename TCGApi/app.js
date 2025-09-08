@@ -566,7 +566,7 @@ app.post('/users/packs/open/:userID', async (req, res) => {
 
 
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
+    console.log(` GITHUB TEST - Example app listening on port ${port}`)
 })
 
 async function ReadUser(response, username) {
