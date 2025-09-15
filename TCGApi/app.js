@@ -604,7 +604,7 @@ app.get('/product/price/', async (request, response) => {
         // Get product ID cost
         const targetProduct = await product.findOne({ productID: productID });
 
-        console.log("Found: " + targetProduct.productID + " - Price: " + productID.product_cost);
+        console.log("Found: " + targetProduct.productID + " - Price: " + targetProduct.product_cost);
 
 
 
