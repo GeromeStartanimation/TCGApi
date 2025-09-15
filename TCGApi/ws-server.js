@@ -6,8 +6,8 @@ const clients = new Map(); // userId -> ws
 function startWebSocket(server) {
     wss = new WebSocket.Server({ server });
 
-    wss.on('connection', (ws) => {
-        console.log("WebSocket client connected");
+    wss.on('connection', (ws, req) => {
+        console.log("WebSocket client connected from", req.socket.remoteAddress, ":", req.socket.remotePort);
 
         ws.on('message', (message) => {
             try {
@@ -31,7 +31,10 @@ function startWebSocket(server) {
         });
     });
 
-    console.log("WebSocket server initialized");
+    // log host and port
+    const addr = server.address();
+    const host = addr.address === '::' ? 'localhost' : addr.address;
+    console.log(`WebSocket server initialized on ws://${host}:${addr.port}`);
 }
 
 function notifyPaymentSuccess(userId) {
