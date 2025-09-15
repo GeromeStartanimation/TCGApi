@@ -606,7 +606,14 @@ app.get('/product/price/', async (request, response) => {
 
         console.log("Found: " + targetProduct.productID + " - Price: " + targetProduct.product_cost);
 
+        response.status(200).json({
 
+            success: true,
+            status: 200,
+            data: targetProduct,
+            error: ""
+
+        });
 
     } catch (error) {
         console.log(error.message);
