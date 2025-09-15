@@ -3,6 +3,22 @@ const app = express()
 app.use(express.json())
 const port = process.env.PORT || 3000
 
+// 🔒 Block requests not from com.startlands.tcg
+app.use((req, res, next) => {
+    const appId = req.headers['x-app-id'];
+
+    if (appId !== 'com.startlands.tcg') {
+        console.log("❌ Blocked request - invalid App ID:", appId);
+        return res.status(403).json({
+            success: false,
+            status: 403,
+            error: "Forbidden: Invalid App ID"
+        });
+    }
+
+    next();
+});
+
 const { MongoClient } = require("mongodb");
 // Replace the uri string with your connection string
 const uri = process.env.DB || "mongodb://localhost:27017/";
@@ -10,6 +26,8 @@ const client = new MongoClient(uri);
 
 const database = client.db('tcg');
 const users = database.collection('users');
+const product = database.collection('price_list');
+
 
 
 app.get('/users/:username', async (request, response) => {
@@ -563,6 +581,38 @@ app.post('/users/packs/open/:userID', async (req, res) => {
     }
 });
 
+app.post('/users/pay/', async (request, response) => {
+
+    try {
+        let { userID, quantity, productID } = request.body; // card = tid
+
+        console.log("Processing payment for " + userID + " of product " + productID + " x" + quantity);
+
+
+
+    } catch (error) {
+        console.log(error.message);
+        return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
+    }
+});
+
+app.get('/product/price/', async (request, response) => {
+
+    try {
+        let { productID } = request.query; 
+
+        // Get product ID cost
+        const targetProduct = await product.findOne({ productID: productID });
+
+        console.log("Found: " + targetProduct.productID + " - Price: " + productID.product_cost);
+
+
+
+    } catch (error) {
+        console.log(error.message);
+        return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
+    }
+});  
 
 
 app.listen(port, () => {
