@@ -582,7 +582,6 @@ app.post('/users/pay/', async (request, response) => {
         return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
     }
 });
-});
 
 app.get('/product/price/', async (request, response) => {
 
