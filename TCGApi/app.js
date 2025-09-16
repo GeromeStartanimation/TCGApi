@@ -566,18 +566,22 @@ app.post('/users/packs/open/:userID', async (req, res) => {
 });
 
 app.post('/users/pay/', async (request, response) => {
-
     try {
         let { userID, quantity, productID } = request.body; // card = tid
-
         console.log("Processing payment for " + userID + " of product " + productID + " x" + quantity);
-
-
-
+        await fetch("https://api.startlands.com/api/payment/tcg/top-up", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ userID, quantity, productID })
+        })
+        response.status(200).json({ success: true, status: 200, data: "", error: "" });
     } catch (error) {
         console.log(error.message);
         return response.status(500).json({ success: false, status: 500, data: "", error: "Database Error" });
     }
+});
 });
 
 app.get('/product/price/', async (request, response) => {
