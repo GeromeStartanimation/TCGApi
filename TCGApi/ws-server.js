@@ -23,14 +23,25 @@ function startWebSocket(server, options = {}) {
     server.on('upgrade', (req, socket, head) => {
         const { pathname } = url.parse(req.url);
 
-        console.log(`[WS] Upgrade request: path=${pathname}, headers=${JSON.stringify(req.headers)}`);
-
+        // Only allow the expected path
         if (pathname !== path) {
-            console.log(`[WS] Invalid path ${pathname}, closing socket`);
             socket.destroy();
             return;
         }
 
+        // Check for secret header (no response if invalid)
+        const appId = req.headers['x-app-id'];
+        const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
+            .split(',')
+            .map(s => s.trim());
+
+        if (!appId || !allowedAppIds.includes(appId)) {
+            // silently drop the connection
+            socket.destroy();
+            return;
+        }
+
+        // If everything is fine, upgrade to WS
         wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit('connection', ws, req);
         });
@@ -62,7 +73,7 @@ function startWebSocket(server, options = {}) {
         });
 
         ws.on('close', (code, reason) => {
-            console.log(`[WS] Closed: code=${code}, reason=${reason}`);
+            console.log(`[WS] Closed: code=${code}, reason=${reason}`)
             for (const [userId, set] of clients.entries()) {
                 if (set.has(ws)) {
                     set.delete(ws);
