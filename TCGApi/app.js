@@ -574,7 +574,7 @@ app.post('/users/pay/', async (request, response) => {
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ userID, quantity, product_id : productID })
+            body: JSON.stringify({ userID, quantity, productID })
         })
         response.status(200).json({ success: true, status: 200, data: "", error: "" });
     } catch (error) {
