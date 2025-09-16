@@ -1,35 +1,23 @@
-﻿const express = require('express')
-const app = express()
-app.use(express.json())
-const port = process.env.PORT || 3000
+﻿// app.js
+const express = require('express');
+const cors = require('cors');   // <-- added
+const { MongoClient, ObjectId } = require("mongodb");
 
-// 🔒 Block requests not from com.startlands.tcg
-app.use((req, res, next) => {
-    const appId = req.headers['x-app-id'];
+const app = express();
+app.use(express.json());
 
-    if (appId !== 'com.startlands.tcg') {
-        console.log("❌ Blocked request - invalid App ID:", appId);
-        return res.status(403).json({
-            success: false,
-            status: 403,
-            error: "Forbidden: Invalid App ID"
-        });
-    }
+// 🔽 added: Open CORS for all origins (needed for Unity / mobile apps)
+app.use(cors({ origin: true, credentials: true }));
 
-    next();
-});
-
-const { MongoClient } = require("mongodb");
-// Replace the uri string with your connection string
+const port = process.env.PORT || 3000;
 const uri = process.env.DB || "mongodb://localhost:27017/";
 const client = new MongoClient(uri);
 
 const database = client.db('tcg');
 const users = database.collection('users');
-const product = database.collection('price_list');
 
-
-
+// 🔽 added: import notifyPaymentSuccess so we can call it in pay/success route
+const { notifyPaymentSuccess } = require('./ws-server');
 
 
 app.get('/users/:username', async (request, response) => {
@@ -139,7 +127,6 @@ app.post('/users/edit/:userID', async (request, response) => {
     }
 });
 
-
 // Save or update a user deck
 app.post('/users/deck/:userID', async (req, res) => {
     try {
@@ -216,9 +203,6 @@ app.delete('/users/deck/:userID', async (req, res) => {
         return res.status(500).json({ success: false, error: "Database error" });
     }
 });
-
-
-
 
 app.post('/users/rewards/gain/:userID', async (req, res) => {
     try {
@@ -463,8 +447,6 @@ app.post('/users/cards/sell/:userID', async (req, res) => {
     }
 });
 
-
-
 // POST /users/packs/buy/:userID
 app.post('/users/packs/buy/:userID', async (req, res) => {
     try {
@@ -629,73 +611,41 @@ const server = app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
 });
 
-// attach WebSocket
-const { startWebSocket, notifyPaymentSuccess } = require('./ws-server');
-startWebSocket(server);
+const { startWebSocket } = require('./ws-server');
+startWebSocket(server, { path: '/ws' });
+
 
 // Example endpoint to trigger notification (for Bruno testing)
-app.post('/users/pay/success/:userID', async (req, res) => {
+// Payment success route (Dragonpay webhook etc.)
+app.post('/users/pay/success/:userId', async (req, res) => {
     try {
-        const userId = req.params.userID;
+        const userId = req.params.userId;
         const { tokenType, quantity } = req.body;
 
-        if (!tokenType || (tokenType !== "tokenStart" && tokenType !== "tokenStackey")) {
-            return res.status(400).json({
-                success: false,
-                status: 400,
-                error: "Invalid tokenType. Must be 'tokenStart' or 'tokenStackey'"
-            });
+        const qty = Number(quantity);
+        if (isNaN(qty)) {
+            return res.status(400).json({ error: 'Quantity must be a number' });
         }
 
-        const qty = parseInt(quantity, 10);
-        if (isNaN(qty) || qty <= 0) {
-            return res.status(400).json({
-                success: false,
-                status: 400,
-                error: "Invalid quantity"
-            });
-        }
-
-        // Load user
-        const user = await users.findOne({ id: userId });
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                status: 404,
-                error: "User not found"
-            });
-        }
-
-        // Update the chosen token field
-        const currentValue = Number(user[tokenType]) || 0;
-        const newValue = currentValue + qty;
-
-        await users.updateOne(
+        //  Use the "id" field, not the Mongo _id
+        const result = await users.updateOne(
             { id: userId },
-            { $set: { [tokenType]: newValue } }
+            { $inc: { [tokenType]: qty } }
         );
 
-        console.log(`Updated ${tokenType} for user ${userId}: ${currentValue} -> ${newValue}`);
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({ error: 'User not found or no update applied' });
+        }
 
-        // Notify Unity client over WebSocket
         notifyPaymentSuccess(userId);
 
-        return res.json({
-            success: true,
-            status: 200,
-            message: `Payment success, ${tokenType} updated by ${qty}`,
-            data: { [tokenType]: newValue }
-        });
-
-    } catch (error) {
-        console.error("Payment success error:", error.message);
-        return res.status(500).json({
-            success: false,
-            status: 500,
-            error: "Database Error"
-        });
+        res.json({ success: true, updated: result.modifiedCount });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Payment update failed' });
     }
 });
+
 
 
 async function ReadUser(response, username) {

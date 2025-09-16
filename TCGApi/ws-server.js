@@ -1,57 +1,127 @@
+// ws-server.js
 const WebSocket = require('ws');
+const url = require('url');
 
 let wss;
-const clients = new Map(); // userId -> { ws, listeningId? }
 
-function startWebSocket(server) {
-    wss = new WebSocket.Server({ server });
+// Map of userId -> Set<WebSocket>
+const clients = new Map();
 
-    wss.on('connection', (ws, req) => {
-        console.log(`WebSocket client connected from ${req.socket.remoteAddress}:${req.socket.remotePort}`);
+/**
+ * Start WebSocket server
+ */
+function startWebSocket(server, options = {}) {
+    const path = options.path || process.env.WS_PATH || '/ws';
 
-        ws.on('message', (message) => {
-            try {
-                const data = JSON.parse(message.toString());
-                if (data.userId) {
-                    clients.set(data.userId, ws);
-                    console.log(`Registered WebSocket for user ${data.userId}`);
-                }
-            } catch (err) {
-                console.error("Invalid message", err);
-            }
-        });
+    // Use noServer so we can bind path & headers ourselves
+    wss = new WebSocket.Server({
+        noServer: true,
+        clientTracking: true,
+        perMessageDeflate: true,
+    });
 
-        ws.on('close', () => {
-            for (const [userId, socket] of clients.entries()) {
-                if (socket === ws) {
-                    clients.delete(userId);
-                    console.log(`WebSocket for user ${userId} disconnected`);
-                }
-            }
+    server.on('upgrade', (req, socket, head) => {
+        const { pathname } = url.parse(req.url);
+
+        console.log(`[WS] Upgrade request: path=${pathname}, headers=${JSON.stringify(req.headers)}`);
+
+        if (pathname !== path) {
+            console.log(`[WS] Invalid path ${pathname}, closing socket`);
+            socket.destroy();
+            return;
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit('connection', ws, req);
         });
     });
 
-    // Log server binding info
-    const addr = server.address();
-    console.log("WebSocket server bound to:", addr);
+    wss.on('connection', (ws, req) => {
+        const remote = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
+        console.log(`[WS] Client connected from ${remote}, url=${req.url}`);
 
+        // Heartbeat
+        ws.isAlive = true;
+        ws.on('pong', () => {
+            ws.isAlive = true;
+        });
+
+        ws.on('message', (message) => {
+            console.log(`[WS] Raw message: ${message}`);
+            try {
+                const data = JSON.parse(message.toString());
+                if (data.userId) {
+                    const set = clients.get(data.userId) || new Set();
+                    set.add(ws);
+                    clients.set(data.userId, set);
+                    console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
+                }
+            } catch (err) {
+                console.error('[WS] Invalid message JSON', err);
+            }
+        });
+
+        ws.on('close', (code, reason) => {
+            console.log(`[WS] Closed: code=${code}, reason=${reason}`);
+            for (const [userId, set] of clients.entries()) {
+                if (set.has(ws)) {
+                    set.delete(ws);
+                    if (set.size === 0) clients.delete(userId);
+                    console.log(`[WS] Cleaned up userId=${userId}, remaining clients=${set.size}`);
+                    break;
+                }
+            }
+        });
+
+        ws.on('error', (err) => {
+            console.error('[WS] Socket error:', err);
+        });
+    });
+
+    // Heartbeat interval
+    const interval = setInterval(() => {
+        for (const ws of wss.clients) {
+            if (!ws.isAlive) {
+                console.log('[WS] Terminating stale client');
+                ws.terminate();
+                continue;
+            }
+            ws.isAlive = false;
+            ws.ping();
+        }
+    }, Number(process.env.WS_HEARTBEAT_SEC || 30) * 1000);
+
+    wss.on('close', () => clearInterval(interval));
+
+    const addr = server.address();
     let host = addr.address;
-    if (host === '::' || host === '0.0.0.0') {
-        host = '0.0.0.0 (all interfaces)';
-    }
-    console.log(`WebSocket server initialized on ws://${host}:${addr.port}`);
+    if (host === '::' || host === '0.0.0.0') host = '0.0.0.0 (all interfaces)';
+    const scheme = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
+    console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
 }
 
+/**
+ * Notify Unity client that a payment succeeded
+ */
 function notifyPaymentSuccess(userId) {
-    const ws = clients.get(userId);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ eventName: "paymentSuccess", userId }));
-        console.log(`Sent paymentSuccess to user ${userId}`);
-        return true;
-    } else {
-        console.log(`User ${userId} not connected or WebSocket not open`);
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] Tried to notify userId=${userId}, but no clients connected`);
         return false;
     }
+
+    const payload = JSON.stringify({ eventName: 'paymentSuccess', userId });
+    console.log(`[WS] Sending paymentSuccess to userId=${userId}, sockets=${set.size}`);
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+        } else {
+            console.log(`[WS] Skipped closed socket for userId=${userId}`);
+        }
+    }
+
+    return true;
 }
 
 module.exports = { startWebSocket, notifyPaymentSuccess };
