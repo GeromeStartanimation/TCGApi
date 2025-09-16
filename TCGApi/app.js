@@ -15,6 +15,7 @@ const client = new MongoClient(uri);
 
 const database = client.db('tcg');
 const users = database.collection('users');
+const product = database.collection('price_list');
 
 // 🔽 added: import notifyPaymentSuccess so we can call it in pay/success route
 const { notifyPaymentSuccess } = require('./ws-server');
@@ -587,6 +588,8 @@ app.get('/product/price/', async (request, response) => {
 
     try {
         let { productID } = request.query; 
+
+        console.log(productID);
 
         // Get product ID cost
         const targetProduct = await product.findOne({ productID: productID });
