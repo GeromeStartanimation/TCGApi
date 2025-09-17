@@ -570,12 +570,17 @@ app.post('/users/pay/', async (request, response) => {
     try {
         let { userID, quantity, productID } = request.body; // card = tid
         console.log("Processing payment for " + userID + " of product " + productID + " x" + quantity);
-        await fetch("https://api.staging.startlands.com/api/payment/tcg/top-up", {
+        await fetch("https://api.staging.startlands.com/api/currency/balance-premium", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ userID, quantity, productID })
+            body: JSON.stringify({
+
+                "user_id": "68ae92a7f1708f51cafbc9df",
+                "product_id": "68ca7187647bf4dfcb53d716",
+                "quantity": 1
+            })
         })
         response.status(200).json({ success: true, status: 200, data: "", error: "" });
     } catch (error) {
