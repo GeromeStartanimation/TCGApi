@@ -570,7 +570,7 @@ app.post('/users/pay/', async (request, response) => {
     try {
         let { userID, quantity, productID } = request.body; // card = tid
         console.log("Processing payment for " + userID + " of product " + productID + " x" + quantity);
-        await fetch("https://api.staging.startlands.com/api/currency/balance-premium", {
+        await fetch("https://api.staging.startlands.com/api/product/purchase", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
