@@ -18,7 +18,7 @@ const users = database.collection('users');
 const product = database.collection('price_list');
 
 // 🔽 added: import notifyPaymentSuccess so we can call it in pay/success route
-const { notifyPaymentSuccess } = require('./ws-server');
+const { notifyPaymentSuccess, notifyPaymentProcess } = require('./ws-server');
 
 
 app.get('/users/:username', async (request, response) => {
