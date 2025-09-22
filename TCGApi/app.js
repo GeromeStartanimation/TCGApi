@@ -577,7 +577,7 @@ app.post('/users/pay/', async (request, response) => {
             },
             body: JSON.stringify({
 
-                "user_id": "68ae92a7f1708f51cafbc9df",
+                "user_id": userID,
                 "product_id": "68ca7187647bf4dfcb53d716",
                 "quantity": 1
             })
