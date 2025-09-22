@@ -662,10 +662,11 @@ app.post('/users/pay/process/:userId', async (req, res) => {
         const userId = req.params.userId;
         const { url } = req.body;
 
-        const qty = Number(quantity);
-        if (isNaN(qty)) {
+        if (!url) {
             return res.status(400).json({ error: 'Quantity must be a number' });
         }
+
+        console.log(url);
 
         notifyPaymentProcess(userId);
 
