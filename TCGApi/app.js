@@ -663,19 +663,21 @@ app.post('/users/pay/process/:userId', async (req, res) => {
         const { url } = req.body;
 
         if (!url) {
-            return res.status(400).json({ error: 'Quantity must be a number' });
+            return res.status(400).json({ error: "Missing 'url' in request body" });
         }
 
-        console.log(url);
+        console.log(`[PayProcessAPI] userId=${userId}, url=${url}`);
 
-        notifyPaymentProcess(userId);
+        // Notify Unity client(s) via WebSocket
+        const notified = notifyPaymentProcess(userId);
 
-        res.json({ success: true, updated: result.modifiedCount });
+        res.json({ success: true, notified });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Payment update failed' });
+        console.error("[PayProcessAPI] Error:", err);
+        res.status(500).json({ error: 'Payment process failed' });
     }
 });
+
 
 
 

@@ -142,7 +142,7 @@ function notifyPaymentProcess(userId) {
         return false;
     }
 
-    const payload = JSON.stringify({ eventName: 'paymentSuccess', userId });
+    const payload = JSON.stringify({ eventName: 'paymentProcess', userId });
     console.log(`[WS] Sending payment Process Windows to userId=${userId}, sockets=${set.size}`);
 
     for (const ws of set) {
