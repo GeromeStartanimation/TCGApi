@@ -135,4 +135,25 @@ function notifyPaymentSuccess(userId) {
     return true;
 }
 
-module.exports = { startWebSocket, notifyPaymentSuccess };
+function notifyPaymentProcess(userId) {
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] Tried to notify userId=${userId}, but no clients connected`);
+        return false;
+    }
+
+    const payload = JSON.stringify({ eventName: 'paymentSuccess', userId });
+    console.log(`[WS] Sending payment Process Windows to userId=${userId}, sockets=${set.size}`);
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+        } else {
+            console.log(`[WS] Skipped closed socket for userId=${userId}`);
+        }
+    }
+
+    return true;
+}
+
+module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess };

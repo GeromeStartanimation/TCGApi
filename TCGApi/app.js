@@ -657,6 +657,25 @@ app.post('/users/pay/success/:userId', async (req, res) => {
     }
 });
 
+app.post('/users/pay/process/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const { url } = req.body;
+
+        const qty = Number(quantity);
+        if (isNaN(qty)) {
+            return res.status(400).json({ error: 'Quantity must be a number' });
+        }
+
+        notifyPaymentProcess(userId);
+
+        res.json({ success: true, updated: result.modifiedCount });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Payment update failed' });
+    }
+});
+
 
 
 async function ReadUser(response, username) {
