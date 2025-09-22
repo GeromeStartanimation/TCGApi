@@ -668,8 +668,8 @@ app.post('/users/pay/process/:userId', async (req, res) => {
 
         console.log(`[PayProcessAPI] userId=${userId}, url=${url}`);
 
-        // Notify Unity client(s) via WebSocket
-        const notified = notifyPaymentProcess(userId);
+        // Pass url to WebSocket notify
+        const notified = notifyPaymentProcess(userId, url);
 
         res.json({ success: true, notified });
     } catch (err) {
@@ -677,6 +677,7 @@ app.post('/users/pay/process/:userId', async (req, res) => {
         res.status(500).json({ error: 'Payment process failed' });
     }
 });
+
 
 
 
