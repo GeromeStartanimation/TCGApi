@@ -325,6 +325,59 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
             return res.json({ success: true, status: 200, data: updatedUser, error: "" });
         }
 
+        // ----- COIN REWARD -----
+        if (type === 'coin') {
+            const amount = Number(req.body.quantity);
+            const flag = req.body.flag || null;
+
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    status: 400,
+                    data: "",
+                    error: "Invalid coin amount"
+                });
+            }
+
+            console.log(`[RewardsAPI] Coin reward for ${userID}: amount=${amount}, flag=${flag ?? '-'}`);
+
+            const user = await users.findOne({ id: userID }, { projection: { rewards: 1 } });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    status: 404,
+                    data: "",
+                    error: "User not found"
+                });
+            }
+
+            // Optional idempotency check
+            if (flag && Array.isArray(user.rewards) && user.rewards.includes(flag)) {
+                return res.status(409).json({
+                    success: false,
+                    status: 409,
+                    data: "",
+                    error: "Reward already claimed"
+                });
+            }
+
+            const update = { $inc: { coins: amount } };
+            if (flag) update.$addToSet = { rewards: flag };
+
+            const updatedUser = await users.findOneAndUpdate(
+                { id: userID },
+                update,
+                { returnDocument: 'after' }
+            );
+
+            return res.json({
+                success: true,
+                status: 200,
+                data: updatedUser,
+                error: ""
+            });
+        }
+
 
         // Unknown reward type
         return res.status(400).json({ success: false, status: 400, data: "", error: `Invalid reward type '${type}'` });
