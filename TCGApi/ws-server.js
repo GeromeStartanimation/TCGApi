@@ -85,6 +85,15 @@ function startWebSocket(server, options = {}) {
                     }
                 }
 
+                // Handle IDENTIFY by username (for invites)
+                if (data.eventName === "identify" && data.username) {
+                    const set = clientsByUsername.get(data.username) || new Set();
+                    set.add(ws);
+                    clientsByUsername.set(data.username, set);
+                    ws.username = data.username;
+                    console.log(`[WS] Registered username=${data.username}, total clients=${set.size}`);
+                }
+
             } catch (err) {
                 console.error('[WS] Invalid message JSON', err);
             }
