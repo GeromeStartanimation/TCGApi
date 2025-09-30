@@ -85,6 +85,46 @@ function startWebSocket(server, options = {}) {
                     }
                 }
 
+                // Handle cancel
+                if (data.eventName === "private_invite_cancel") {
+                    const targetSet = clientsByUsername.get(data.toUsername);
+                    if (targetSet) {
+                        for (const client of targetSet) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify(data));
+                            }
+                        }
+                    }
+                    console.log(`[WS] Invite canceled by ${data.fromUsername} for ${data.toUsername}`);
+                }
+
+                // Handle reject
+                if (data.eventName === "private_invite_reject") {
+                    const targetSet = clientsByUsername.get(data.toUsername);
+                    if (targetSet) {
+                        for (const client of targetSet) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify(data));
+                            }
+                        }
+                    }
+                    console.log(`[WS] Invite rejected by ${data.fromUsername} to ${data.toUsername}`);
+                }
+
+                // Handle confirm
+                if (data.eventName === "private_invite_confirm") {
+                    const targetSet = clientsByUsername.get(data.toUsername);
+                    if (targetSet) {
+                        for (const client of targetSet) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify(data));
+                            }
+                        }
+                    }
+                    console.log(`[WS] Invite confirmed between ${data.fromUsername} and ${data.toUsername}`);
+                }
+
+
                 // Handle IDENTIFY by username (for invites)
                 if (data.eventName === "identify" && data.username) {
                     const set = clientsByUsername.get(data.username) || new Set();
