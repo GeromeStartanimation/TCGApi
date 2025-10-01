@@ -4,10 +4,18 @@ const url = require('url');
 
 let wss;
 
+// ===============================
+// Data Stores
+// ===============================
+
 // Map of userId -> Set<WebSocket>
 const clients = new Map();
+
 // Map of username -> Set<WebSocket>
 const clientsByUsername = new Map();
+
+// Map of username -> status ("online", "in_game", "offline")
+const userStatuses = new Map();
 
 function startWebSocket(server, options = {}) {
     const path = options.path || process.env.WS_PATH || '/ws';
@@ -18,6 +26,9 @@ function startWebSocket(server, options = {}) {
         perMessageDeflate: true,
     });
 
+    // ===============================
+    // Handle Upgrade Requests (HTTP -> WS)
+    // ===============================
     server.on('upgrade', (req, socket, head) => {
         const { pathname } = url.parse(req.url);
         if (pathname !== path) {
@@ -25,6 +36,7 @@ function startWebSocket(server, options = {}) {
             return;
         }
 
+        // Security: check app-id header
         const appId = req.headers['x-app-id'];
         const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
             .split(',')
@@ -40,19 +52,28 @@ function startWebSocket(server, options = {}) {
         });
     });
 
+    // ===============================
+    // Handle WebSocket Connection
+    // ===============================
     wss.on('connection', (ws, req) => {
         const remote = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
         console.log(`[WS] Client connected from ${remote}, url=${req.url}`);
 
+        // Setup heartbeat for idle detection
         ws.isAlive = true;
         ws.on('pong', () => ws.isAlive = true);
 
+        // ===============================
+        // Handle Messages
+        // ===============================
         ws.on('message', (message) => {
             console.log(`[WS] Raw message: ${message}`);
             try {
                 const data = JSON.parse(message.toString());
 
-                // Handle IDENTIFY by userId
+                // -------------------------------
+                // IDENTIFY (by userId)
+                // -------------------------------
                 if (data.userId) {
                     const set = clients.get(data.userId) || new Set();
                     set.add(ws);
@@ -61,16 +82,33 @@ function startWebSocket(server, options = {}) {
                     console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
                 }
 
-                // Handle IDENTIFY by username (for invites)
-                if (data.username && !data.eventName) {
+                // -------------------------------
+                // IDENTIFY (by username)
+                // -------------------------------
+                if (data.eventName === "identify" && data.username) {
                     const set = clientsByUsername.get(data.username) || new Set();
                     set.add(ws);
                     clientsByUsername.set(data.username, set);
                     ws.username = data.username;
-                    console.log(`[WS] Registered username=${data.username}, total clients=${set.size}`);
+
+                    // Track status as "online"
+                    userStatuses.set(data.username, "online");
+
+                    console.log(`[WS] Registered username=${data.username}, status=online, total clients=${set.size}`);
                 }
 
-                // Handle private_invite
+                // -------------------------------
+                // STATUS CHANGE (set_status)
+                // -------------------------------
+                if (data.eventName === "set_status" && data.username && data.status) {
+                    const newStatus = data.status; // "online" | "in_game" | "offline"
+                    userStatuses.set(data.username, newStatus);
+                    console.log(`[WS] ${data.username} set status to ${newStatus}`);
+                }
+
+                // -------------------------------
+                // Handle PRIVATE INVITE
+                // -------------------------------
                 if (data.eventName === 'private_invite') {
                     const targetSet = clientsByUsername.get(data.toUsername);
                     if (targetSet && targetSet.size > 0) {
@@ -85,7 +123,9 @@ function startWebSocket(server, options = {}) {
                     }
                 }
 
-                // Handle cancel
+                // -------------------------------
+                // Handle CANCEL
+                // -------------------------------
                 if (data.eventName === "private_invite_cancel") {
                     const targetSet = clientsByUsername.get(data.toUsername);
                     if (targetSet) {
@@ -98,7 +138,9 @@ function startWebSocket(server, options = {}) {
                     console.log(`[WS] Invite canceled by ${data.fromUsername} for ${data.toUsername}`);
                 }
 
-                // Handle reject
+                // -------------------------------
+                // Handle REJECT
+                // -------------------------------
                 if (data.eventName === "private_invite_reject") {
                     const targetSet = clientsByUsername.get(data.toUsername);
                     if (targetSet) {
@@ -111,7 +153,9 @@ function startWebSocket(server, options = {}) {
                     console.log(`[WS] Invite rejected by ${data.fromUsername} to ${data.toUsername}`);
                 }
 
-                // Handle confirm
+                // -------------------------------
+                // Handle CONFIRM
+                // -------------------------------
                 if (data.eventName === "private_invite_confirm") {
                     const targetSet = clientsByUsername.get(data.toUsername);
                     if (targetSet) {
@@ -124,23 +168,17 @@ function startWebSocket(server, options = {}) {
                     console.log(`[WS] Invite confirmed between ${data.fromUsername} and ${data.toUsername}`);
                 }
 
-
-                // Handle IDENTIFY by username (for invites)
-                if (data.eventName === "identify" && data.username) {
-                    const set = clientsByUsername.get(data.username) || new Set();
-                    set.add(ws);
-                    clientsByUsername.set(data.username, set);
-                    ws.username = data.username;
-                    console.log(`[WS] Registered username=${data.username}, total clients=${set.size}`);
-                }
-
             } catch (err) {
                 console.error('[WS] Invalid message JSON', err);
             }
         });
 
+        // ===============================
+        // Handle Close (disconnect)
+        // ===============================
         ws.on('close', (code, reason) => {
             console.log(`[WS] Closed: code=${code}, reason=${reason}`);
+
             if (ws.userId) {
                 const set = clients.get(ws.userId);
                 if (set) {
@@ -148,19 +186,30 @@ function startWebSocket(server, options = {}) {
                     if (set.size === 0) clients.delete(ws.userId);
                 }
             }
+
             if (ws.username) {
                 const set = clientsByUsername.get(ws.username);
                 if (set) {
                     set.delete(ws);
-                    if (set.size === 0) clientsByUsername.delete(ws.username);
+                    if (set.size === 0) {
+                        clientsByUsername.delete(ws.username);
+                        // Mark user offline when all connections are gone
+                        userStatuses.set(ws.username, "offline");
+                        console.log(`[WS] ${ws.username} is now offline`);
+                    }
                 }
             }
         });
 
+        // ===============================
+        // Handle Errors
+        // ===============================
         ws.on('error', (err) => console.error('[WS] Socket error:', err));
     });
 
-    // Heartbeat
+    // ===============================
+    // Heartbeat (keep connections alive)
+    // ===============================
     const interval = setInterval(() => {
         for (const ws of wss.clients) {
             if (!ws.isAlive) {
@@ -182,8 +231,17 @@ function startWebSocket(server, options = {}) {
     console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
 }
 
-// Existing payment functions stay the same
+// ===============================
+// Helper Functions
+// ===============================
+
+// Existing payment functions (unchanged stubs)
 function notifyPaymentSuccess(userId) { /* unchanged */ }
 function notifyPaymentProcess(userId, url) { /* unchanged */ }
 
-module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess };
+// New: get user status
+function getUserStatus(username) {
+    return userStatuses.get(username) || "offline";
+}
+
+module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess, getUserStatus };
