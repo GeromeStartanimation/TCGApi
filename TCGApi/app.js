@@ -263,7 +263,7 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
 
             const result = await users.updateOne(
                 { _id: user._id },
-                { $inc: { "userPackProgressDatas.$[elem].pullcount": quantity } },
+                { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } },
                 { arrayFilters: [{ "elem.packName": packName }] }
             );
 
