@@ -237,10 +237,8 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
             const user = await loadUser({ userPackProgressDatas: 1 });
             if (!user) return;
 
-            // quantity from payload
             const quantity = req.body.quantity ?? 1;
 
-            // parse json field to extract packName
             let packName;
             try {
                 const extra = JSON.parse(req.body.json || "{}");
@@ -263,19 +261,20 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 });
             }
 
-            // increment pullcount at userPackProgressDatas > packName
-            await users.updateOne(
+            const result = await users.updateOne(
                 { _id: user._id },
-                { $inc: { [`userPackProgressDatas.${packName}.pullcount`]: quantity } }
+                { $inc: { "userPackProgressDatas.$[elem].pullcount": quantity } },
+                { arrayFilters: [{ "elem.packName": packName }] }
             );
 
             return res.json({
                 success: true,
                 status: 200,
-                data: { packName, quantity },
+                data: { packName, quantity, modified: result.modifiedCount },
                 error: ""
             });
         }
+
 
 
         // ----- COIN REWARD (compatible with your new struct, if you want to keep it here) -----
