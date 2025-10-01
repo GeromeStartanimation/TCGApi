@@ -94,7 +94,7 @@ function startWebSocket(server, options = {}) {
                     // Track status as "online"
                     userStatuses.set(data.username, "online");
 
-                    console.log(`[WS] Registered username=${data.username}, status=online, total clients=${set.size}`);
+                    console.log(`[WS] IDENTIFY -> ${data.username} logged in, STATUS=ONLINE, total clients=${set.size}`);
                 }
 
                 // -------------------------------
@@ -103,7 +103,7 @@ function startWebSocket(server, options = {}) {
                 if (data.eventName === "set_status" && data.username && data.status) {
                     const newStatus = data.status; // "online" | "in_game" | "offline"
                     userStatuses.set(data.username, newStatus);
-                    console.log(`[WS] ${data.username} set status to ${newStatus}`);
+                    console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
                 }
 
                 // -------------------------------
@@ -195,7 +195,7 @@ function startWebSocket(server, options = {}) {
                         clientsByUsername.delete(ws.username);
                         // Mark user offline when all connections are gone
                         userStatuses.set(ws.username, "offline");
-                        console.log(`[WS] ${ws.username} is now offline`);
+                        console.log(`[WS] DISCONNECT -> ${ws.username} is now OFFLINE`);
                     }
                 }
             }
@@ -213,7 +213,7 @@ function startWebSocket(server, options = {}) {
     const interval = setInterval(() => {
         for (const ws of wss.clients) {
             if (!ws.isAlive) {
-                console.log('[WS] Terminating stale client');
+                console.log('[WS] Terminating stale client (no heartbeat)');
                 ws.terminate();
                 continue;
             }
