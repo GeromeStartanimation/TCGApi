@@ -245,7 +245,7 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 return;
             }
 
-            const quantity = req.body.quantity ?? 1;
+            const quantity = Number(req.body.quantity ?? 1); // <--- force numeric
             console.log("[PACK] Quantity:", quantity);
 
             let packName;
@@ -282,7 +282,6 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 let updateQuery;
 
                 if (quantity === -1) {
-                    // Normalize: use $set instead of $inc
                     updateQuery = { $set: { "userPackProgressDatas.$[elem].pullCount": 0 } };
                 } else {
                     updateQuery = { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } };
@@ -312,6 +311,7 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 });
             }
         }
+
 
 
 
