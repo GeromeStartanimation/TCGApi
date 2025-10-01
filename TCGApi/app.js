@@ -233,6 +233,51 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
             return res.status(400).json({ success: false, status: 400, data: "", error: "Card reward branch not implemented in this snippet" });
         }
 
+        if (type === 'pack') {
+            const user = await loadUser({ userPackProgressDatas: 1 });
+            if (!user) return;
+
+            // quantity from payload
+            const quantity = req.body.quantity ?? 1;
+
+            // parse json field to extract packName
+            let packName;
+            try {
+                const extra = JSON.parse(req.body.json || "{}");
+                packName = extra.packName;
+            } catch (err) {
+                return res.status(400).json({
+                    success: false,
+                    status: 400,
+                    data: "",
+                    error: "Invalid JSON payload"
+                });
+            }
+
+            if (!packName) {
+                return res.status(400).json({
+                    success: false,
+                    status: 400,
+                    data: "",
+                    error: "Missing packName in json field"
+                });
+            }
+
+            // increment pullcount at userPackProgressDatas > packName
+            await users.updateOne(
+                { _id: user._id },
+                { $inc: { [`userPackProgressDatas.${packName}.pullcount`]: quantity } }
+            );
+
+            return res.json({
+                success: true,
+                status: 200,
+                data: { packName, quantity },
+                error: ""
+            });
+        }
+
+
         // ----- COIN REWARD (compatible with your new struct, if you want to keep it here) -----
         if (type === 'coin') {
             const amount = Number.isFinite(quantity) ? quantity : Number(req.body.quantity);
@@ -341,7 +386,6 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
         return res.status(500).json({ success: false, status: 500, data: "", error: "Database error" });
     }
 });
-
 
 app.post('/users/cards/buy/:userID', async (request, response) => {
     try {
