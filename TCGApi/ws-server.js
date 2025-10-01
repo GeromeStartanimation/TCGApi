@@ -68,120 +68,117 @@ function startWebSocket(server, options = {}) {
         // ===============================
         ws.on('message', (message) => {
             console.log(`[WS] Raw message: ${message}`);
+            let data;
             try {
-                const data = JSON.parse(message.toString());
-
-                // -------------------------------
-                // IDENTIFY (by userId)
-                // -------------------------------
-                if (data.userId) {
-                    const set = clients.get(data.userId) || new Set();
-                    set.add(ws);
-                    clients.set(data.userId, set);
-                    ws.userId = data.userId;
-                    console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
-                }
-
-                // -------------------------------
-                // IDENTIFY (by username)
-                // -------------------------------
-                if (data.eventName === "identify" && data.username) {
-                    const set = clientsByUsername.get(data.username) || new Set();
-                    set.add(ws);
-                    clientsByUsername.set(data.username, set);
-                    ws.username = data.username;
-
-                    // Track status as "online"
-                    userStatuses.set(data.username, "online");
-
-                    console.log(`[WS] IDENTIFY -> ${data.username} logged in, STATUS=ONLINE, total clients=${set.size}`);
-                }
-
-                // -------------------------------
-                // STATUS CHANGE (set_status)
-                // -------------------------------
-                if (data.eventName === "set_status" && data.username && data.status) {
-                    const newStatus = data.status;
-                    userStatuses.set(data.username, newStatus);
-                    console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
-
-                    // Broadcast to all connected clients
-                    const update = JSON.stringify({
-                        eventName: "status_update",
-                        username: data.username,
-                        status: newStatus
-                    });
-                    for (const client of wss.clients) {
-                        if (client.readyState === WebSocket.OPEN) {
-                            client.send(update);
-                        }
-                    }
-                }
-
-                // -------------------------------
-                // Handle PRIVATE INVITE
-                // -------------------------------
-                if (data.eventName === 'private_invite') {
-                    const targetSet = clientsByUsername.get(data.toUsername);
-                    if (targetSet && targetSet.size > 0) {
-                        for (const client of targetSet) {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(JSON.stringify(data));
-                            }
-                        }
-                        console.log(`[WS] Forwarded invite from ${data.fromUsername} to ${data.toUsername}`);
-                    } else {
-                        console.log(`[WS] Target not connected: ${data.toUsername}`);
-                    }
-                }
-
-                // -------------------------------
-                // Handle CANCEL
-                // -------------------------------
-                if (data.eventName === "private_invite_cancel") {
-                    const targetSet = clientsByUsername.get(data.toUsername);
-                    if (targetSet) {
-                        for (const client of targetSet) {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(JSON.stringify(data));
-                            }
-                        }
-                    }
-                    console.log(`[WS] Invite canceled by ${data.fromUsername} for ${data.toUsername}`);
-                }
-
-                // -------------------------------
-                // Handle REJECT
-                // -------------------------------
-                if (data.eventName === "private_invite_reject") {
-                    const targetSet = clientsByUsername.get(data.toUsername);
-                    if (targetSet) {
-                        for (const client of targetSet) {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(JSON.stringify(data));
-                            }
-                        }
-                    }
-                    console.log(`[WS] Invite rejected by ${data.fromUsername} to ${data.toUsername}`);
-                }
-
-                // -------------------------------
-                // Handle CONFIRM
-                // -------------------------------
-                if (data.eventName === "private_invite_confirm") {
-                    const targetSet = clientsByUsername.get(data.toUsername);
-                    if (targetSet) {
-                        for (const client of targetSet) {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(JSON.stringify(data));
-                            }
-                        }
-                    }
-                    console.log(`[WS] Invite confirmed between ${data.fromUsername} and ${data.toUsername}`);
-                }
-
+                data = JSON.parse(message.toString());
             } catch (err) {
                 console.error('[WS] Invalid message JSON', err);
+                return;
+            }
+
+            // -------------------------------
+            // IDENTIFY (by userId)
+            // -------------------------------
+            if (data.userId) {
+                const set = clients.get(data.userId) || new Set();
+                set.add(ws);
+                clients.set(data.userId, set);
+                ws.userId = data.userId;
+                console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
+            }
+
+            // -------------------------------
+            // IDENTIFY (by username)
+            // -------------------------------
+            if (data.eventName === "identify" && data.username) {
+                const set = clientsByUsername.get(data.username) || new Set();
+                set.add(ws);
+                clientsByUsername.set(data.username, set);
+                ws.username = data.username;
+
+                // Track as online
+                userStatuses.set(data.username, "online");
+                console.log(`[WS] IDENTIFY -> ${data.username} logged in, STATUS=ONLINE, total clients=${set.size}`);
+
+                // Broadcast to everyone else that this user is online
+                broadcastStatusUpdate(data.username, "online", ws);
+
+                // Send a snapshot of all known statuses to THIS client
+                sendStatusSnapshot(ws);
+            }
+
+            // -------------------------------
+            // STATUS CHANGE (set_status)
+            // -------------------------------
+            if (data.eventName === "set_status" && data.username && data.status) {
+                const newStatus = data.status; // "online" | "in_game" | "offline"
+                userStatuses.set(data.username, newStatus);
+                console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
+
+                // Broadcast to all clients
+                broadcastStatusUpdate(data.username, newStatus, null);
+            }
+
+            // -------------------------------
+            // Handle PRIVATE INVITE
+            // -------------------------------
+            if (data.eventName === 'private_invite') {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet && targetSet.size > 0) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                    console.log(`[WS] Forwarded invite from ${data.fromUsername} to ${data.toUsername}`);
+                } else {
+                    console.log(`[WS] Target not connected: ${data.toUsername}`);
+                }
+            }
+
+            // -------------------------------
+            // Handle CANCEL
+            // -------------------------------
+            if (data.eventName === "private_invite_cancel") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite canceled by ${data.fromUsername} for ${data.toUsername}`);
+            }
+
+            // -------------------------------
+            // Handle REJECT
+            // -------------------------------
+            if (data.eventName === "private_invite_reject") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite rejected by ${data.fromUsername} to ${data.toUsername}`);
+            }
+
+            // -------------------------------
+            // Handle CONFIRM
+            // -------------------------------
+            if (data.eventName === "private_invite_confirm") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite confirmed between ${data.fromUsername} and ${data.toUsername}`);
             }
         });
 
@@ -200,60 +197,3 @@ function startWebSocket(server, options = {}) {
             }
 
             if (ws.username) {
-                const set = clientsByUsername.get(ws.username);
-                if (set) {
-                    set.delete(ws);
-                    if (set.size === 0) {
-                        clientsByUsername.delete(ws.username);
-                        // Mark user offline when all connections are gone
-                        userStatuses.set(ws.username, "offline");
-                        console.log(`[WS] DISCONNECT -> ${ws.username} is now OFFLINE`);
-                    }
-                }
-            }
-        });
-
-        // ===============================
-        // Handle Errors
-        // ===============================
-        ws.on('error', (err) => console.error('[WS] Socket error:', err));
-    });
-
-    // ===============================
-    // Heartbeat (keep connections alive)
-    // ===============================
-    const interval = setInterval(() => {
-        for (const ws of wss.clients) {
-            if (!ws.isAlive) {
-                console.log('[WS] Terminating stale client (no heartbeat)');
-                ws.terminate();
-                continue;
-            }
-            ws.isAlive = false;
-            ws.ping();
-        }
-    }, Number(process.env.WS_HEARTBEAT_SEC || 30) * 1000);
-
-    wss.on('close', () => clearInterval(interval));
-
-    const addr = server.address();
-    let host = addr.address;
-    if (host === '::' || host === '0.0.0.0') host = '0.0.0.0 (all interfaces)';
-    const scheme = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
-    console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
-}
-
-// ===============================
-// Helper Functions
-// ===============================
-
-// Existing payment functions (unchanged stubs)
-function notifyPaymentSuccess(userId) { /* unchanged */ }
-function notifyPaymentProcess(userId, url) { /* unchanged */ }
-
-// New: get user status
-function getUserStatus(username) {
-    return userStatuses.get(username) || "offline";
-}
-
-module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess, getUserStatus };
