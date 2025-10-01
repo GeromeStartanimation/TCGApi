@@ -279,9 +279,18 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                     " packName:", packName,
                     " quantity:", quantity);
 
+                let updateQuery;
+
+                if (quantity === -1) {
+                    // Normalize: use $set instead of $inc
+                    updateQuery = { $set: { "userPackProgressDatas.$[elem].pullCount": 0 } };
+                } else {
+                    updateQuery = { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } };
+                }
+
                 const result = await users.updateOne(
                     { _id: user._id },
-                    { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } },
+                    updateQuery,
                     { arrayFilters: [{ "elem.packName": packName }] }
                 );
 
