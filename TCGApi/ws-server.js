@@ -276,8 +276,49 @@ function sendStatusSnapshot(ws) {
 }
 
 // Existing payment functions (unchanged stubs)
-function notifyPaymentSuccess(userId) { /* unchanged */ }
-function notifyPaymentProcess(userId, url) { /* unchanged */ }
+// Broadcast payment success to the identified user
+function notifyPaymentSuccess(userId) {
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] No active connection for userId=${userId} (paymentSuccess)`);
+        return;
+    }
+
+    const payload = JSON.stringify({
+        eventName: "paymentSuccess",
+        userId
+    });
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            console.log(`[WS] Sent paymentSuccess to userId=${userId}`);
+        }
+    }
+}
+
+// Broadcast payment process (open URL) to the identified user
+function notifyPaymentProcess(userId, url) {
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] No active connection for userId=${userId} (paymentProcess)`);
+        return;
+    }
+
+    const payload = JSON.stringify({
+        eventName: "paymentProcess",
+        userId,
+        url
+    });
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            console.log(`[WS] Sent paymentProcess to userId=${userId}, url=${url}`);
+        }
+    }
+}
+
 
 // New: get user status
 function getUserStatus(username) {
