@@ -197,3 +197,91 @@ function startWebSocket(server, options = {}) {
             }
 
             if (ws.username) {
+                const set = clientsByUsername.get(ws.username);
+                if (set) {
+                    set.delete(ws);
+                    if (set.size === 0) {
+                        clientsByUsername.delete(ws.username);
+                        // Mark user offline when all connections are gone
+                        userStatuses.set(ws.username, "offline");
+                        console.log(`[WS] DISCONNECT -> ${ws.username} is now OFFLINE`);
+                        broadcastStatusUpdate(ws.username, "offline", null);
+                    }
+                }
+            }
+        });
+
+        // ===============================
+        // Handle Errors
+        // ===============================
+        ws.on('error', (err) => console.error('[WS] Socket error:', err));
+    });
+
+    // ===============================
+    // Heartbeat (keep connections alive)
+    // ===============================
+    const interval = setInterval(() => {
+        for (const ws of wss.clients) {
+            if (!ws.isAlive) {
+                console.log('[WS] Terminating stale client (no heartbeat)');
+                ws.terminate(); // triggers 'close' which will mark offline + broadcast
+                continue;
+            }
+            ws.isAlive = false;
+            ws.ping();
+        }
+    }, Number(process.env.WS_HEARTBEAT_SEC || 30) * 1000);
+
+    wss.on('close', () => clearInterval(interval));
+
+    const addr = server.address();
+    let host = addr.address;
+    if (host === '::' || host === '0.0.0.0') host = '0.0.0.0 (all interfaces)';
+    const scheme = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
+    console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
+}
+
+// ===============================
+// Helper Functions
+// ===============================
+
+function broadcastStatusUpdate(username, status, excludeWs) {
+    const payload = JSON.stringify({
+        eventName: "status_update",
+        username,
+        status
+    });
+    for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN && client !== excludeWs) {
+            client.send(payload);
+        }
+    }
+}
+
+function sendStatusSnapshot(ws) {
+    const entries = [];
+    for (const [username, status] of userStatuses.entries()) {
+        entries.push({ username, status });
+    }
+    const payload = JSON.stringify({
+        eventName: "status_snapshot",
+        entries
+    });
+    try {
+        if (ws.readyState === WebSocket.OPEN)
+            ws.send(payload);
+    } catch (e) {
+        console.error('[WS] Failed to send status snapshot:', e);
+    }
+}
+
+// Existing payment functions (unchanged stubs)
+function notifyPaymentSuccess(userId) { /* unchanged */ }
+function notifyPaymentProcess(userId, url) { /* unchanged */ }
+
+// New: get user status
+function getUserStatus(username) {
+    return userStatuses.get(username) || "offline";
+}
+
+module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess, getUserStatus };
