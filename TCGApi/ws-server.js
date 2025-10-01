@@ -101,9 +101,21 @@ function startWebSocket(server, options = {}) {
                 // STATUS CHANGE (set_status)
                 // -------------------------------
                 if (data.eventName === "set_status" && data.username && data.status) {
-                    const newStatus = data.status; // "online" | "in_game" | "offline"
+                    const newStatus = data.status;
                     userStatuses.set(data.username, newStatus);
                     console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
+
+                    // Broadcast to all connected clients
+                    const update = JSON.stringify({
+                        eventName: "status_update",
+                        username: data.username,
+                        status: newStatus
+                    });
+                    for (const client of wss.clients) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(update);
+                        }
+                    }
                 }
 
                 // -------------------------------
