@@ -210,6 +210,7 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
         const userID = req.params.userID;
         const { type } = req.body;
 
+        console.log(userID + " requested reward, type: " + type);
         // Support both new fields and legacy "reward" envelope for backward-compat
         const quantity = Number(req.body.quantity ?? 1);
         const flag = req.body.flag || null;
