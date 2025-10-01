@@ -234,16 +234,26 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
         }
 
         if (type === 'pack') {
+            console.log("[PACK] Incoming body:", req.body);
+
             const user = await loadUser({ userPackProgressDatas: 1 });
-            if (!user) return;
+            console.log("[PACK] Loaded user:", user?._id, user?.username);
+
+            if (!user) {
+                console.error("[PACK] No user found for request");
+                return;
+            }
 
             const quantity = req.body.quantity ?? 1;
+            console.log("[PACK] Quantity:", quantity);
 
             let packName;
             try {
                 const extra = JSON.parse(req.body.json || "{}");
+                console.log("[PACK] Parsed extra JSON:", extra);
                 packName = extra.packName;
             } catch (err) {
+                console.error("[PACK] Failed to parse req.body.json:", req.body.json, err);
                 return res.status(400).json({
                     success: false,
                     status: 400,
@@ -252,7 +262,9 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 });
             }
 
+            console.log("[PACK] PackName:", packName);
             if (!packName) {
+                console.error("[PACK] Missing packName in JSON payload");
                 return res.status(400).json({
                     success: false,
                     status: 400,
@@ -261,19 +273,36 @@ app.post('/users/rewards/gain/:userID', async (req, res) => {
                 });
             }
 
-            const result = await users.updateOne(
-                { _id: user._id },
-                { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } },
-                { arrayFilters: [{ "elem.packName": packName }] }
-            );
+            try {
+                console.log("[PACK] Attempting DB update: user._id:", user._id,
+                    " packName:", packName,
+                    " quantity:", quantity);
 
-            return res.json({
-                success: true,
-                status: 200,
-                data: { packName, quantity, modified: result.modifiedCount },
-                error: ""
-            });
+                const result = await users.updateOne(
+                    { _id: user._id },
+                    { $inc: { "userPackProgressDatas.$[elem].pullCount": quantity } },
+                    { arrayFilters: [{ "elem.packName": packName }] }
+                );
+
+                console.log("[PACK] Update result:", result);
+
+                return res.json({
+                    success: true,
+                    status: 200,
+                    data: { packName, quantity, modified: result.modifiedCount },
+                    error: ""
+                });
+            } catch (err) {
+                console.error("[PACK] Database error during update:", err);
+                return res.status(500).json({
+                    success: false,
+                    status: 500,
+                    data: "",
+                    error: "Database error"
+                });
+            }
         }
+
 
 
 
