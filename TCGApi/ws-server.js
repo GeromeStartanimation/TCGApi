@@ -1,126 +1,34 @@
 // ws-server.js
-// A minimal-yet-robust WebSocket server with presence tracking.
-// - Detects "zombie" clients via heartbeat (default 10s)
-// - Marks users offline when their last socket dies
-// - Exposes notifyPaymentSuccess / notifyPaymentProcess(userId, ...) utilities
-// - Supports identification via { eventName: "identify", username, userId? }
-// - Optional header allowlist via X-App-Id
-//
-// Usage (in your HTTP server bootstrap):
-//   const httpServer = require('http').createServer(app);
-//   const { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess } = require('./ws-server');
-//   startWebSocket(httpServer, { path: '/ws' });
-//   httpServer.listen(PORT);
-
 const WebSocket = require('ws');
 const url = require('url');
 
-// ====== CONFIG ======
-const WS_PATH = process.env.WS_PATH || '/ws';
-const HEARTBEAT_SEC = Number(process.env.WS_HEARTBEAT_SEC || 10);
-const ALLOWED_APP_IDS = (process.env.WS_ALLOWED_APP_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-// Example: WS_ALLOWED_APP_IDS="com.startlands.tcg,dev.local"
+let wss;
 
-// ====== STATE MAPS ======
-// Sockets keyed by Startlands "userId"
-const clientsByUserId = new Map();     // Map<string, Set<WebSocket>>
-// Sockets keyed by username (used for friends list presence)
-const clientsByUsername = new Map();   // Map<string, Set<WebSocket>>
-// Presence registry
-const userStatuses = new Map();        // Map<string, "offline"|"online"|"in_game"|"busy"|string>
+// ===============================
+// Data Stores
+// ===============================
 
-// ====== HELPERS ======
-function safeAddToMapSet(map, key, value) {
-    let set = map.get(key);
-    if (!set) { set = new Set(); map.set(key, set); }
-    set.add(value);
-    return set;
-}
+// Map of userId -> Set<WebSocket>
+const clients = new Map();
 
-function safeRemoveFromMapSet(map, key, value) {
-    const set = map.get(key);
-    if (!set) return 0;
-    set.delete(value);
-    if (set.size === 0) map.delete(key);
-    return set.size;
-}
+// Map of username -> Set<WebSocket>
+const clientsByUsername = new Map();
 
-function socketIsOpen(ws) {
-    return ws && ws.readyState === WebSocket.OPEN;
-}
-
-function broadcastStatusUpdate(username, status, excludeWs = null) {
-    const payload = JSON.stringify({
-        eventName: 'status_update',
-        username,
-        status
-    });
-    // Broadcast to all connected peers (simple + effective for friends lists)
-    // If you want to target only friends of "username", implement a roster and filter here.
-    wss.clients.forEach((client) => {
-        if (client !== excludeWs && socketIsOpen(client)) {
-            try { client.send(payload); } catch { }
-        }
-    });
-}
-
-function sendStatusSnapshot(ws) {
-    // Provide a compact snapshot of all known presences on connect/identify
-    const list = [];
-    for (const [username, status] of userStatuses.entries()) {
-        list.push({ username, status });
-    }
-    const payload = JSON.stringify({
-        eventName: 'status_snapshot',
-        users: list
-    });
-    try { if (socketIsOpen(ws)) ws.send(payload); } catch { }
-}
-
-// ====== PAYMENT NOTIFIERS (unchanged public API) ======
-function notifyPaymentSuccess(userId) {
-    const set = clientsByUserId.get(String(userId));
-    if (!set || set.size === 0) {
-        console.log(`[Topup/WS] No live sockets for userId=${userId} (payment_success skipped)`);
-        return;
-    }
-    const payload = JSON.stringify({ eventName: 'payment_success' });
-    for (const ws of set) {
-        if (socketIsOpen(ws)) {
-            try { ws.send(payload); } catch (e) { console.error('[Topup/WS] send error:', e?.message || e); }
-        }
-    }
-    console.log(`[Topup/WS] payment_success sent to userId=${userId}`);
-}
-
-function notifyPaymentProcess(userId, url) {
-    const set = clientsByUserId.get(String(userId));
-    if (!set || set.size === 0) {
-        console.log(`[Topup/WS] No live sockets for userId=${userId} (payment_process skipped)`);
-        return;
-    }
-    const payload = JSON.stringify({ eventName: 'payment_process', url });
-    for (const ws of set) {
-        if (socketIsOpen(ws)) {
-            try { ws.send(payload); } catch (e) { console.error('[Topup/WS] send error:', e?.message || e); }
-        }
-    }
-    console.log(`[Topup/WS] payment_process sent to userId=${userId} url=${url}`);
-}
-
-// ====== SERVER ======
-let wss = null;
+// Map of username -> status ("online", "in_game", "offline")
+const userStatuses = new Map();
 
 function startWebSocket(server, options = {}) {
-    const path = options.path || WS_PATH;
+    const path = options.path || process.env.WS_PATH || '/ws';
 
     wss = new WebSocket.Server({
         noServer: true,
         clientTracking: true,
-        perMessageDeflate: true
+        perMessageDeflate: true,
     });
 
-    // HTTP->WS upgrade gate: enforce path and optional header checks
+    // ===============================
+    // Handle Upgrade Requests (HTTP -> WS)
+    // ===============================
     server.on('upgrade', (req, socket, head) => {
         const { pathname } = url.parse(req.url);
         if (pathname !== path) {
@@ -128,12 +36,14 @@ function startWebSocket(server, options = {}) {
             return;
         }
 
-        // Optional header allowlist
-        const appId = (req.headers['x-app-id'] || req.headers['X-App-Id'] || '').toString();
-        if (ALLOWED_APP_IDS.length > 0 && !ALLOWED_APP_IDS.includes(appId)) {
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        // Security: check app-id header
+        const appId = req.headers['x-app-id'];
+        const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
+            .split(',')
+            .map(s => s.trim());
+
+        if (!appId || !allowedAppIds.includes(appId)) {
             socket.destroy();
-            console.warn(`[WS] Blocked upgrade: invalid x-app-id="${appId}"`);
             return;
         }
 
@@ -142,186 +52,277 @@ function startWebSocket(server, options = {}) {
         });
     });
 
+    // ===============================
+    // Handle WebSocket Connection
+    // ===============================
     wss.on('connection', (ws, req) => {
         const remote = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
+        console.log(`[WS] Client connected from ${remote}, url=${req.url}`);
+
+        // Setup heartbeat for idle detection
         ws.isAlive = true;
-        ws.on('pong', () => { ws.isAlive = true; });
+        ws.on('pong', () => ws.isAlive = true);
 
-        console.log(`[WS] Client connected from ${remote} url=${req.url}`);
-
-        ws.on('message', (buf) => {
-            let data = null;
+        // ===============================
+        // Handle Messages
+        // ===============================
+        ws.on('message', (message) => {
+            console.log(`[WS] Raw message: ${message}`);
+            let data;
             try {
-                data = JSON.parse(buf.toString());
-            } catch {
-                console.error('[WS] Invalid JSON message');
+                data = JSON.parse(message.toString());
+            } catch (err) {
+                console.error('[WS] Invalid message JSON', err);
                 return;
             }
 
-            // Legacy: allow initial payload { userId: "..." } (for payments)
+            // -------------------------------
+            // IDENTIFY (by userId)
+            // -------------------------------
             if (data.userId) {
-                ws.userId = String(data.userId);
-                safeAddToMapSet(clientsByUserId, ws.userId, ws);
-                console.log(`[WS] Bound userId=${ws.userId} (sockets=${clientsByUserId.get(ws.userId)?.size || 0})`);
+                const set = clients.get(data.userId) || new Set();
+                set.add(ws);
+                clients.set(data.userId, set);
+                ws.userId = data.userId;
+                console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
             }
 
-            // Presence identify: { eventName: "identify", username, userId? }
-            if (data.eventName === 'identify' && data.username) {
-                ws.username = String(data.username);
-                safeAddToMapSet(clientsByUsername, ws.username, ws);
+            // -------------------------------
+            // IDENTIFY (by username)
+            // -------------------------------
+            if (data.eventName === "identify" && data.username) {
+                const set = clientsByUsername.get(data.username) || new Set();
+                set.add(ws);
+                clientsByUsername.set(data.username, set);
+                ws.username = data.username;
 
-                // (Optional) also bind userId if provided here
-                if (data.userId) {
-                    ws.userId = String(data.userId);
-                    safeAddToMapSet(clientsByUserId, ws.userId, ws);
-                }
+                // Track as online
+                userStatuses.set(data.username, "online");
+                console.log(`[WS] IDENTIFY -> ${data.username} logged in, STATUS=ONLINE, total clients=${set.size}`);
 
-                // Mark online + broadcast
-                const prev = userStatuses.get(ws.username);
-                if (prev !== 'online') {
-                    userStatuses.set(ws.username, 'online');
-                    broadcastStatusUpdate(ws.username, 'online', ws);
-                }
-                // Give the client a snapshot for its UI
+                // Broadcast to everyone else that this user is online
+                broadcastStatusUpdate(data.username, "online", ws);
+
+                // Send a snapshot of all known statuses to THIS client
                 sendStatusSnapshot(ws);
-
-                console.log(`[WS] identify username=${ws.username} userId=${ws.userId || '(n/a)'} sockets.username=${clientsByUsername.get(ws.username)?.size || 0}`);
             }
 
-            // Manual status switch (e.g., in_game / busy / offline)
-            if (data.eventName === 'set_status' && data.username && data.status) {
-                const u = String(data.username);
-                const s = String(data.status);
-                userStatuses.set(u, s);
-                broadcastStatusUpdate(u, s, null);
-                console.log(`[WS] set_status username=${u} -> ${s}`);
+            // -------------------------------
+            // STATUS CHANGE (set_status)
+            // -------------------------------
+            if (data.eventName === "set_status" && data.username && data.status) {
+                const newStatus = data.status; // "online" | "in_game" | "offline"
+                userStatuses.set(data.username, newStatus);
+                console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
+
+                // Broadcast to all clients
+                broadcastStatusUpdate(data.username, newStatus, null);
             }
 
-            // Example invite relay (optional; keep if you already use these names)
-            // { eventName:"private_invite", toUsername, fromUsername, payload }
-            if (data.eventName === 'private_invite' && data.toUsername && data.fromUsername) {
-                relayToUsername(data.toUsername, {
-                    eventName: 'private_invite',
-                    fromUsername: data.fromUsername,
-                    payload: data.payload ?? {}
-                });
+            // -------------------------------
+            // Handle PRIVATE INVITE
+            // -------------------------------
+            if (data.eventName === 'private_invite') {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet && targetSet.size > 0) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                    console.log(`[WS] Forwarded invite from ${data.fromUsername} to ${data.toUsername}`);
+                } else {
+                    console.log(`[WS] Target not connected: ${data.toUsername}`);
+                }
             }
-            // { eventName:"private_invite_cancel", toUsername, fromUsername }
-            if (data.eventName === 'private_invite_cancel' && data.toUsername && data.fromUsername) {
-                relayToUsername(data.toUsername, {
-                    eventName: 'private_invite_cancel',
-                    fromUsername: data.fromUsername
-                });
+
+            // -------------------------------
+            // Handle CANCEL
+            // -------------------------------
+            if (data.eventName === "private_invite_cancel") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite canceled by ${data.fromUsername} for ${data.toUsername}`);
             }
-            // { eventName:"private_invite_reject", toUsername, fromUsername }
-            if (data.eventName === 'private_invite_reject' && data.toUsername && data.fromUsername) {
-                relayToUsername(data.toUsername, {
-                    eventName: 'private_invite_reject',
-                    fromUsername: data.fromUsername
-                });
+
+            // -------------------------------
+            // Handle REJECT
+            // -------------------------------
+            if (data.eventName === "private_invite_reject") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite rejected by ${data.fromUsername} to ${data.toUsername}`);
             }
-            // { eventName:"private_invite_confirm", toUsername, fromUsername, roomId }
-            if (data.eventName === 'private_invite_confirm' && data.toUsername && data.fromUsername) {
-                relayToUsername(data.toUsername, {
-                    eventName: 'private_invite_confirm',
-                    fromUsername: data.fromUsername,
-                    roomId: data.roomId
-                });
+
+            // -------------------------------
+            // Handle CONFIRM
+            // -------------------------------
+            if (data.eventName === "private_invite_confirm") {
+                const targetSet = clientsByUsername.get(data.toUsername);
+                if (targetSet) {
+                    for (const client of targetSet) {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(data));
+                        }
+                    }
+                }
+                console.log(`[WS] Invite confirmed between ${data.fromUsername} and ${data.toUsername}`);
             }
         });
 
-        // Centralized disconnect cleanup
-        const handleDisconnect = (why) => {
-            // Remove from userId map
+        // ===============================
+        // Handle Close (disconnect)
+        // ===============================
+        ws.on('close', (code, reason) => {
+            console.log(`[WS] Closed: code=${code}, reason=${reason}`);
+
             if (ws.userId) {
-                safeRemoveFromMapSet(clientsByUserId, ws.userId, ws);
+                const set = clients.get(ws.userId);
+                if (set) {
+                    set.delete(ws);
+                    if (set.size === 0) clients.delete(ws.userId);
+                }
             }
 
-            // Remove from username map
             if (ws.username) {
-                const remaining = safeRemoveFromMapSet(clientsByUsername, ws.username, ws);
-                if (remaining === 0) {
-                    // Last socket for this username gone -> offline
-                    if (userStatuses.get(ws.username) !== 'offline') {
-                        userStatuses.set(ws.username, 'offline');
-                        broadcastStatusUpdate(ws.username, 'offline', null);
+                const set = clientsByUsername.get(ws.username);
+                if (set) {
+                    set.delete(ws);
+                    if (set.size === 0) {
+                        clientsByUsername.delete(ws.username);
+                        // Mark user offline when all connections are gone
+                        userStatuses.set(ws.username, "offline");
+                        console.log(`[WS] DISCONNECT -> ${ws.username} is now OFFLINE`);
+                        broadcastStatusUpdate(ws.username, "offline", null);
                     }
                 }
             }
-
-            console.log(`[WS] Disconnected ${ws.username || '(unknown)'}: ${why}`);
-        };
-
-        ws.on('close', (code, reason) => {
-            handleDisconnect(`close code=${code} reason=${reason}`);
         });
 
-        ws.on('error', (err) => {
-            console.error('[WS] Socket error:', err?.message || err);
-            handleDisconnect('error');
-        });
+        // ===============================
+        // Handle Errors
+        // ===============================
+        ws.on('error', (err) => console.error('[WS] Socket error:', err));
     });
 
-    // Heartbeat + presence sweep (reap zombies + enforce offline if no sockets remain)
+    // ===============================
+    // Heartbeat (keep connections alive)
+    // ===============================
     const interval = setInterval(() => {
-        // 1) Heartbeat sweep
         for (const ws of wss.clients) {
-            if (ws.isAlive === false) {
-                console.log('[WS] Terminating stale client (no heartbeat pong)');
-                try { ws.terminate(); } catch { }
+            if (!ws.isAlive) {
+                console.log('[WS] Terminating stale client (no heartbeat)');
+                ws.terminate(); // triggers 'close' which will mark offline + broadcast
                 continue;
             }
             ws.isAlive = false;
-            try { ws.ping(); } catch { }
+            ws.ping();
         }
-
-        // 2) Presence sweep: ensure "offline" if a username has no OPEN sockets
-        for (const [username, set] of [...clientsByUsername.entries()]) {
-            // remove closed sockets defensively
-            for (const s of [...set]) {
-                if (!socketIsOpen(s)) set.delete(s);
-            }
-            if (set.size === 0) {
-                clientsByUsername.delete(username);
-                if (userStatuses.get(username) !== 'offline') {
-                    userStatuses.set(username, 'offline');
-                    broadcastStatusUpdate(username, 'offline', null);
-                }
-            }
-        }
-    }, HEARTBEAT_SEC * 1000);
+    }, Number(process.env.WS_HEARTBEAT_SEC || 30) * 1000);
 
     wss.on('close', () => clearInterval(interval));
 
     const addr = server.address();
-    let host = addr?.address || '0.0.0.0';
+    let host = addr.address;
     if (host === '::' || host === '0.0.0.0') host = '0.0.0.0 (all interfaces)';
     const scheme = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
-    console.log(`[WS] Server listening on ${scheme}://${host}:${addr?.port}${path}`);
+    console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
 }
 
-// Relay helper for invites/messages by username
-function relayToUsername(toUsername, obj) {
-    const set = clientsByUsername.get(String(toUsername));
-    if (!set || set.size === 0) return false;
-    const payload = JSON.stringify(obj);
-    let sent = 0;
-    for (const ws of set) {
-        if (socketIsOpen(ws)) {
-            try { ws.send(payload); sent++; } catch { }
+// ===============================
+// Helper Functions
+// ===============================
+
+function broadcastStatusUpdate(username, status, excludeWs) {
+    const payload = JSON.stringify({
+        eventName: "status_update",
+        username,
+        status
+    });
+    for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN && client !== excludeWs) {
+            client.send(payload);
         }
     }
-    return sent > 0;
 }
 
-// Optional: public query for presence (consume from HTTP if needed)
+function sendStatusSnapshot(ws) {
+    const entries = [];
+    for (const [username, status] of userStatuses.entries()) {
+        entries.push({ username, status });
+    }
+    const payload = JSON.stringify({
+        eventName: "status_snapshot",
+        entries
+    });
+    try {
+        if (ws.readyState === WebSocket.OPEN)
+            ws.send(payload);
+    } catch (e) {
+        console.error('[WS] Failed to send status snapshot:', e);
+    }
+}
+
+// Existing payment functions (unchanged stubs)
+// Broadcast payment success to the identified user
+function notifyPaymentSuccess(userId) {
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] No active connection for userId=${userId} (paymentSuccess)`);
+        return;
+    }
+
+    const payload = JSON.stringify({
+        eventName: "paymentSuccess",
+        userId
+    });
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            console.log(`[WS] Sent paymentSuccess to userId=${userId}`);
+        }
+    }
+}
+
+// Broadcast payment process (open URL) to the identified user
+function notifyPaymentProcess(userId, url) {
+    const set = clients.get(userId);
+    if (!set || set.size === 0) {
+        console.log(`[WS] No active connection for userId=${userId} (paymentProcess)`);
+        return;
+    }
+
+    const payload = JSON.stringify({
+        eventName: "paymentProcess",
+        userId,
+        url
+    });
+
+    for (const ws of set) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            console.log(`[WS] Sent paymentProcess to userId=${userId}, url=${url}`);
+        }
+    }
+}
+
+
+// New: get user status
 function getUserStatus(username) {
-    return userStatuses.get(String(username)) || 'offline';
+    return userStatuses.get(username) || "offline";
 }
 
-module.exports = {
-    startWebSocket,
-    notifyPaymentSuccess,
-    notifyPaymentProcess,
-    getUserStatus
-};
+module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess, getUserStatus };
