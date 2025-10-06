@@ -40,7 +40,7 @@ function startWebSocket(server, options = {}) {
         }
 
         // Security: check app-id header
-        const appId = req.headers['x-app-id'];
+        const appId = req.headers['x-app-id'] || req.headers['sec-websocket-protocol'];
         const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
             .split(',')
             .map(s => s.trim());
