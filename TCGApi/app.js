@@ -773,6 +773,7 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
         const userId = req.params.userId;
         const { roomName } = req.body;
 
+
         if (!roomName || typeof roomName !== 'string') {
             return res.status(400).json({ success: false, error: "Missing or invalid 'roomName' in request body" });
         }
