@@ -773,14 +773,12 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
         const userId = req.params.userId;
         const { roomName } = req.body;
 
-
         if (!roomName || typeof roomName !== 'string') {
             return res.status(400).json({ success: false, error: "Missing or invalid 'roomName' in request body" });
         }
 
-        const filter = ObjectId.isValid(userId)
-            ? { _id: new ObjectId(userId) }
-            : { username: userId };
+        // Use the 'id' field instead of '_id' or 'username'
+        const filter = { id: userId };
 
         const result = await users.updateOne(filter, {
             $set: { activeRoomName: roomName.trim() }
@@ -796,11 +794,13 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
             data: { userId, activeRoomName: roomName.trim(), modified: result.modifiedCount },
             error: ""
         });
+
     } catch (err) {
         console.error("[ActiveRoomAPI] Error:", err);
         res.status(500).json({ success: false, error: 'Failed to update active room' });
     }
 });
+
 
 
 
