@@ -20,18 +20,39 @@ const DUAL_LOGIN_LOG_TAG = '[DualLogin]';
 
 function notifyAndClose(ws, reason, code = 4001) {
     try {
-        blockedSockets.add(ws); // mark as blocked before sending close
+        blockedSockets.add(ws);
+
+        console.log(`[DualLogin] Initiating close: user=${ws.username || 'unknown'} reason=${reason}`);
+
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ eventName: 'dual_login', reason }));
             console.log(`[DualLogin] Sent dual_login to ${ws.username || 'unknown'} (${reason})`);
+        }
+
+        // Notify all other active sockets for the same user
+        if (ws.username && clientsByUsername.has(ws.username)) {
+            for (const client of clientsByUsername.get(ws.username)) {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        eventName: 'dual_login_notice',
+                        reason,
+                        fromServer: true
+                    }));
+                    console.log(`[DualLogin] Notified active socket of ${ws.username} about ${reason}`);
+                }
+            }
         }
     } catch (err) {
         console.error('[DualLogin] Send failed:', err);
     }
 
-    // Delay close so Unity can receive the message
     setTimeout(() => {
-        try { ws.close(code, reason); } catch { }
+        try {
+            ws.close(code, reason);
+            console.log(`[DualLogin] Closed socket for ${ws.username || 'unknown'} with code=${code}`);
+        } catch (e) {
+            console.error('[DualLogin] Error closing socket:', e);
+        }
     }, 300);
 }
 
@@ -40,7 +61,7 @@ function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
     const set = clientsByUsername.get(username) || new Set();
 
     if (status === 'in_game') {
-        console.log(`${DUAL_LOGIN_LOG_TAG} Rejecting NEW session for "${username}" (status=in_game).`);
+        console.log(`${DUAL_LOGIN_LOG_TAG} [Reject] Keeping first session (${username}) because it is in_game.`);
         notifyAndClose(newcomerWs, 'in_game_active_reject_new', 4002);
         return { action: 'reject_new' };
     }
@@ -48,13 +69,15 @@ function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
     if (status === 'online') {
         const others = Array.from(set).filter(s => s !== newcomerWs);
         if (others.length > 0) {
-            console.log(`${DUAL_LOGIN_LOG_TAG} Kicking ${others.length} existing session(s) for "${username}" (status=online).`);
+            console.log(`${DUAL_LOGIN_LOG_TAG} [Replace] New login for "${username}" detected. Kicking ${others.length} existing session(s).`);
             for (const old of others) notifyAndClose(old, 'replaced_by_new_login_online', 4003);
+        } else {
+            console.log(`${DUAL_LOGIN_LOG_TAG} [Online] No other session found for "${username}". Proceeding normally.`);
         }
         return { action: 'kick_previous' };
     }
 
-    console.log(`${DUAL_LOGIN_LOG_TAG} Allowing NEW session for "${username}" (status=${status}).`);
+    console.log(`${DUAL_LOGIN_LOG_TAG} [Allow] No previous session found for "${username}".`);
     return { action: 'allow' };
 }
 
@@ -78,7 +101,6 @@ function startWebSocket(server, options = {}) {
             return;
         }
 
-        // Optional header check
         const appId = req.headers['x-app-id'] || req.headers['sec-websocket-protocol'];
         const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
             .split(',')
@@ -111,7 +133,6 @@ function startWebSocket(server, options = {}) {
                 return;
             }
 
-            // Ignore any message from blocked sockets
             if (blockedSockets.has(ws)) {
                 console.log(`[WS] Ignored message from blocked socket (${ws.username || 'unknown'})`);
                 return;
