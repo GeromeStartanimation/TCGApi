@@ -20,6 +20,44 @@ const userStatuses = new Map();
 // Map of username -> last status timestamp
 const lastStatusAt = new Map();
 
+// --- Dual-login helpers ---
+const DUAL_LOGIN_LOG_TAG = '[DualLogin]';
+function notifyAndClose(ws, reason, code = 4001) {
+    try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ eventName: 'dual_login', reason }));
+        }
+    } catch { }
+    try { ws?.close(code, reason); } catch { }
+}
+
+function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
+    const status = (prevStatus || 'offline').toLowerCase();
+    const set = clientsByUsername.get(username) || new Set();
+
+    if (status === 'in_game') {
+        // Prioritize existing player(s); reject the new one
+        console.log(`${DUAL_LOGIN_LOG_TAG} Rejecting NEW session for "${username}" (status=in_game).`);
+        notifyAndClose(newcomerWs, 'in_game_active_reject_new', 4002);
+        // IMPORTANT: do NOT register newcomer; caller will early-return
+        return { action: 'reject_new' };
+    }
+
+    if (status === 'online') {
+        // Kick previous sessions; keep newcomer
+        const others = Array.from(set).filter(s => s !== newcomerWs);
+        if (others.length > 0) {
+            console.log(`${DUAL_LOGIN_LOG_TAG} Kicking ${others.length} existing session(s) for "${username}" (status=online).`);
+            for (const old of others) notifyAndClose(old, 'replaced_by_new_login_online', 4003);
+        }
+        return { action: 'kick_previous' };
+    }
+
+    // offline/unknown -> allow newcomer
+    console.log(`${DUAL_LOGIN_LOG_TAG} Allowing NEW session for "${username}" (status=${status}).`);
+    return { action: 'allow' };
+}
+
 function startWebSocket(server, options = {}) {
     const path = options.path || process.env.WS_PATH || '/ws';
 
@@ -91,20 +129,39 @@ function startWebSocket(server, options = {}) {
             }
 
             // -------------------------------
-            // IDENTIFY (by username)
+            // IDENTIFY (by username) with dual-login policy
             // -------------------------------
             if (data.eventName === "identify" && data.username) {
-                const set = clientsByUsername.get(data.username) || new Set();
+                const username = String(data.username);
+
+                // Read the saved status BEFORE changing anything
+                const prevStatus = (userStatuses.get(username) || "offline").toLowerCase();
+
+                // Prepare/peek the set of existing sockets
+                let set = clientsByUsername.get(username);
+                if (!set) { set = new Set(); clientsByUsername.set(username, set); }
+
+                // Tentatively add newcomer so we can kick others by reference
                 set.add(ws);
-                clientsByUsername.set(data.username, set);
-                ws.username = data.username;
+                ws.username = username;
 
-                // Track as online
-                userStatuses.set(data.username, "online");
-                lastStatusAt.set(data.username, Date.now());
-                console.log(`[WS] IDENTIFY -> ${data.username} STATUS=ONLINE`);
+                // Enforce policy
+                const action = enforceSecondLoginPolicy(username, ws, prevStatus);
 
-                broadcastStatusUpdate(data.username, "online", ws);
+                if (action.action === 'reject_new') {
+                    // Undo tentative registration
+                    set.delete(ws);
+                    if (set.size === 0) clientsByUsername.delete(username);
+                    // Do NOT flip status or broadcast; newcomer has been closed
+                    return;
+                }
+
+                // Mark as online only for accepted newcomer
+                userStatuses.set(username, "online");
+                lastStatusAt.set(username, Date.now());
+                console.log(`[WS] IDENTIFY -> ${username} STATUS=ONLINE`);
+
+                broadcastStatusUpdate(username, "online", ws);
                 sendStatusSnapshot(ws);
             }
 
