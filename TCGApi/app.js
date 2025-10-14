@@ -50,7 +50,7 @@ app.post('/users/create', async (request, response) => {
 
         const json = request.body;
 
-        console.log(request);
+        console.log('[UserCreateAPI] Body:', request.body);
 
         const doc = json;
 
