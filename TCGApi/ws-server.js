@@ -11,6 +11,7 @@ const clients = new Map(); // userId -> Set<WebSocket>
 const clientsByUsername = new Map(); // username -> Set<WebSocket>
 const userStatuses = new Map(); // username -> "online" | "in_game" | "offline"
 const lastStatusAt = new Map(); // username -> timestamp
+const blockedSockets = new WeakSet(); // sockets that must be ignored after rejection
 
 // ===============================
 // Dual-login helpers
@@ -19,6 +20,7 @@ const DUAL_LOGIN_LOG_TAG = '[DualLogin]';
 
 function notifyAndClose(ws, reason, code = 4001) {
     try {
+        blockedSockets.add(ws); // mark as blocked before sending close
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ eventName: 'dual_login', reason }));
             console.log(`[DualLogin] Sent dual_login to ${ws.username || 'unknown'} (${reason})`);
@@ -27,7 +29,7 @@ function notifyAndClose(ws, reason, code = 4001) {
         console.error('[DualLogin] Send failed:', err);
     }
 
-    // Delay close so Unity can process the message
+    // Delay close so Unity can receive the message
     setTimeout(() => {
         try { ws.close(code, reason); } catch { }
     }, 300);
@@ -109,6 +111,12 @@ function startWebSocket(server, options = {}) {
                 return;
             }
 
+            // Ignore any message from blocked sockets
+            if (blockedSockets.has(ws)) {
+                console.log(`[WS] Ignored message from blocked socket (${ws.username || 'unknown'})`);
+                return;
+            }
+
             // Identify by userId
             if (data.userId) {
                 const set = clients.get(data.userId) || new Set();
@@ -151,6 +159,11 @@ function startWebSocket(server, options = {}) {
 
             // Status change
             if (data.eventName === "set_status" && data.username && data.status) {
+                if (blockedSockets.has(ws)) {
+                    console.log(`[WS] Ignored set_status from blocked socket (${data.username})`);
+                    return;
+                }
+
                 const newStatus = data.status;
                 userStatuses.set(data.username, newStatus);
                 lastStatusAt.set(data.username, Date.now());
@@ -178,6 +191,7 @@ function startWebSocket(server, options = {}) {
         // Close handler
         ws.on('close', (code, reason) => {
             console.log(`[WS] Closed: code=${code}, reason=${reason}`);
+            blockedSockets.delete(ws);
 
             if (ws.userId) {
                 const set = clients.get(ws.userId);
@@ -263,7 +277,7 @@ function getUserStatus(username) {
     return userStatuses.get(username) || "offline";
 }
 
-// Placeholder notifications (unchanged)
+// Placeholder notifications
 function notifyPaymentSuccess(userId) { }
 function notifyPaymentProcess(userId, url) { }
 
