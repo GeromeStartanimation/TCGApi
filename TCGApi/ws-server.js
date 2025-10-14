@@ -7,28 +7,30 @@ let wss;
 // ===============================
 // Data Stores
 // ===============================
+const clients = new Map(); // userId -> Set<WebSocket>
+const clientsByUsername = new Map(); // username -> Set<WebSocket>
+const userStatuses = new Map(); // username -> "online" | "in_game" | "offline"
+const lastStatusAt = new Map(); // username -> timestamp
 
-// Map of userId -> Set<WebSocket>
-const clients = new Map();
-
-// Map of username -> Set<WebSocket>
-const clientsByUsername = new Map();
-
-// Map of username -> status ("online", "in_game", "offline")
-const userStatuses = new Map();
-
-// Map of username -> last status timestamp
-const lastStatusAt = new Map();
-
-// --- Dual-login helpers ---
+// ===============================
+// Dual-login helpers
+// ===============================
 const DUAL_LOGIN_LOG_TAG = '[DualLogin]';
+
 function notifyAndClose(ws, reason, code = 4001) {
     try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ eventName: 'dual_login', reason }));
+            console.log(`[DualLogin] Sent dual_login to ${ws.username || 'unknown'} (${reason})`);
         }
-    } catch { }
-    try { ws?.close(code, reason); } catch { }
+    } catch (err) {
+        console.error('[DualLogin] Send failed:', err);
+    }
+
+    // Delay close so Unity can process the message
+    setTimeout(() => {
+        try { ws.close(code, reason); } catch { }
+    }, 300);
 }
 
 function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
@@ -36,15 +38,12 @@ function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
     const set = clientsByUsername.get(username) || new Set();
 
     if (status === 'in_game') {
-        // Prioritize existing player(s); reject the new one
         console.log(`${DUAL_LOGIN_LOG_TAG} Rejecting NEW session for "${username}" (status=in_game).`);
         notifyAndClose(newcomerWs, 'in_game_active_reject_new', 4002);
-        // IMPORTANT: do NOT register newcomer; caller will early-return
         return { action: 'reject_new' };
     }
 
     if (status === 'online') {
-        // Kick previous sessions; keep newcomer
         const others = Array.from(set).filter(s => s !== newcomerWs);
         if (others.length > 0) {
             console.log(`${DUAL_LOGIN_LOG_TAG} Kicking ${others.length} existing session(s) for "${username}" (status=online).`);
@@ -53,11 +52,13 @@ function enforceSecondLoginPolicy(username, newcomerWs, prevStatus) {
         return { action: 'kick_previous' };
     }
 
-    // offline/unknown -> allow newcomer
     console.log(`${DUAL_LOGIN_LOG_TAG} Allowing NEW session for "${username}" (status=${status}).`);
     return { action: 'allow' };
 }
 
+// ===============================
+// Server Start
+// ===============================
 function startWebSocket(server, options = {}) {
     const path = options.path || process.env.WS_PATH || '/ws';
 
@@ -67,9 +68,7 @@ function startWebSocket(server, options = {}) {
         perMessageDeflate: true,
     });
 
-    // ===============================
-    // Handle Upgrade Requests (HTTP -> WS)
-    // ===============================
+    // Handle HTTP -> WS upgrade
     server.on('upgrade', (req, socket, head) => {
         const { pathname } = url.parse(req.url);
         if (pathname !== path) {
@@ -77,7 +76,7 @@ function startWebSocket(server, options = {}) {
             return;
         }
 
-        // Security: check app-id header
+        // Optional header check
         const appId = req.headers['x-app-id'] || req.headers['sec-websocket-protocol'];
         const allowedAppIds = (process.env.ALLOWED_APP_IDS || 'com.startlands.tcg')
             .split(',')
@@ -93,22 +92,15 @@ function startWebSocket(server, options = {}) {
         });
     });
 
-    // ===============================
-    // Handle WebSocket Connection
-    // ===============================
+    // Connection handler
     wss.on('connection', (ws, req) => {
         const remote = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
         console.log(`[WS] Client connected from ${remote}, url=${req.url}`);
 
-        // Setup heartbeat for idle detection
         ws.isAlive = true;
         ws.on('pong', () => ws.isAlive = true);
 
-        // ===============================
-        // Handle Messages
-        // ===============================
         ws.on('message', (message) => {
-            console.log(`[WS] Raw message: ${message}`);
             let data;
             try {
                 data = JSON.parse(message.toString());
@@ -117,9 +109,7 @@ function startWebSocket(server, options = {}) {
                 return;
             }
 
-            // -------------------------------
-            // IDENTIFY (by userId)
-            // -------------------------------
+            // Identify by userId
             if (data.userId) {
                 const set = clients.get(data.userId) || new Set();
                 set.add(ws);
@@ -128,58 +118,47 @@ function startWebSocket(server, options = {}) {
                 console.log(`[WS] Registered userId=${data.userId}, total clients=${set.size}`);
             }
 
-            // -------------------------------
-            // IDENTIFY (by username) with dual-login policy
-            // -------------------------------
+            // Identify by username (dual-login check)
             if (data.eventName === "identify" && data.username) {
                 const username = String(data.username);
-
-                // Read the saved status BEFORE changing anything
                 const prevStatus = (userStatuses.get(username) || "offline").toLowerCase();
 
-                // Prepare/peek the set of existing sockets
                 let set = clientsByUsername.get(username);
                 if (!set) { set = new Set(); clientsByUsername.set(username, set); }
-
-                // Tentatively add newcomer so we can kick others by reference
                 set.add(ws);
                 ws.username = username;
 
-                // Enforce policy
                 const action = enforceSecondLoginPolicy(username, ws, prevStatus);
-
                 if (action.action === 'reject_new') {
-                    // Undo tentative registration
                     set.delete(ws);
                     if (set.size === 0) clientsByUsername.delete(username);
-                    // Do NOT flip status or broadcast; newcomer has been closed
                     return;
                 }
 
-                // Mark as online only for accepted newcomer
-                userStatuses.set(username, "online");
-                lastStatusAt.set(username, Date.now());
-                console.log(`[WS] IDENTIFY -> ${username} STATUS=ONLINE`);
+                // Preserve "in_game" status
+                const prev = userStatuses.get(username);
+                if (!prev || prev === "offline") {
+                    userStatuses.set(username, "online");
+                    console.log(`[WS] IDENTIFY -> ${username} STATUS=ONLINE`);
+                } else {
+                    console.log(`[WS] IDENTIFY -> ${username} (kept previous status: ${prev})`);
+                }
 
-                broadcastStatusUpdate(username, "online", ws);
+                lastStatusAt.set(username, Date.now());
+                broadcastStatusUpdate(username, userStatuses.get(username), ws);
                 sendStatusSnapshot(ws);
             }
 
-            // -------------------------------
-            // STATUS CHANGE (set_status)
-            // -------------------------------
+            // Status change
             if (data.eventName === "set_status" && data.username && data.status) {
-                const newStatus = data.status; // "online" | "in_game" | "offline"
+                const newStatus = data.status;
                 userStatuses.set(data.username, newStatus);
                 lastStatusAt.set(data.username, Date.now());
                 console.log(`[WS] STATUS UPDATE -> ${data.username} is now ${newStatus.toUpperCase()}`);
-
                 broadcastStatusUpdate(data.username, newStatus, null);
             }
 
-            // -------------------------------
-            // Handle INVITES (unchanged)
-            // -------------------------------
+            // Invitation forwarding
             if (data.eventName === 'private_invite' ||
                 data.eventName === 'private_invite_cancel' ||
                 data.eventName === 'private_invite_reject' ||
@@ -196,9 +175,7 @@ function startWebSocket(server, options = {}) {
             }
         });
 
-        // ===============================
-        // Handle Close (disconnect)
-        // ===============================
+        // Close handler
         ws.on('close', (code, reason) => {
             console.log(`[WS] Closed: code=${code}, reason=${reason}`);
 
@@ -227,9 +204,7 @@ function startWebSocket(server, options = {}) {
         ws.on('error', (err) => console.error('[WS] Socket error:', err));
     });
 
-    // ===============================
-    // Heartbeat + Presence Sweep
-    // ===============================
+    // Heartbeat and timeout sweep
     const interval = setInterval(() => {
         const now = Date.now();
 
@@ -243,7 +218,7 @@ function startWebSocket(server, options = {}) {
             ws.ping();
         }
 
-        // Check last status timestamps (timeout = 60s)
+        // Timeout inactive users after 60s
         for (const [username, ts] of lastStatusAt.entries()) {
             if (now - ts > 60000) {
                 userStatuses.set(username, "offline");
@@ -263,7 +238,9 @@ function startWebSocket(server, options = {}) {
     console.log(`[WS] Server listening on ${scheme}://${host}:${addr.port}${path}`);
 }
 
-// Helpers
+// ===============================
+// Helper functions
+// ===============================
 function broadcastStatusUpdate(username, status, excludeWs) {
     const payload = JSON.stringify({ eventName: "status_update", username, status });
     for (const client of wss.clients) {
@@ -282,11 +259,13 @@ function sendStatusSnapshot(ws) {
     if (ws.readyState === WebSocket.OPEN) ws.send(payload);
 }
 
-// Exports
 function getUserStatus(username) {
     return userStatuses.get(username) || "offline";
 }
-function notifyPaymentSuccess(userId) { /* unchanged */ }
-function notifyPaymentProcess(userId, url) { /* unchanged */ }
 
+// Placeholder notifications (unchanged)
+function notifyPaymentSuccess(userId) { }
+function notifyPaymentProcess(userId, url) { }
+
+// Export
 module.exports = { startWebSocket, notifyPaymentSuccess, notifyPaymentProcess, getUserStatus };
