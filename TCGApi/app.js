@@ -801,24 +801,37 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
     }
 });
 
+
 app.get('/leaderboard/top', async (req, res) => {
     try {
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 100, 500)); // cap to 500
-        // Only non-admins with at least 1 match; project minimal fields
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 100, 500));
+        console.log(`[LeaderboardAPI] Fetching top ${limit} players (permission_level = 1)`);
+
+        // Query: only include permission_level 1
         const cursor = users.find(
-            { permission_level: { $ne: 1 }, matches: { $gt: 0 } },
-            { projection: { _id: 0, username: 1, elo: 1, victories: 1, matches: 1 } }
+            { permission_level: 1 },
+            {
+                projection: {
+                    _id: 0,
+                    username: 1,
+                    elo: 1,
+                    victories: 1,
+                    matches: 1,
+                    permission_level: 1
+                }
+            }
         ).sort({ elo: -1 }).limit(limit);
 
         const entries = await cursor.toArray();
+        console.log(`[LeaderboardAPI] Found ${entries.length} players`);
 
-        // Return a raw array (keeps the Unity client parsing simple)
-        return res.json(entries);
+        res.json(entries);
     } catch (err) {
         console.error("[LeaderboardAPI] Error:", err);
-        return res.status(500).json({ error: "Database error" });
+        res.status(500).json({ error: "Database error" });
     }
 });
+
 
 
 
