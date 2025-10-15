@@ -801,6 +801,25 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
     }
 });
 
+app.get('/leaderboard/top', async (req, res) => {
+    try {
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 100, 500)); // cap to 500
+        // Only non-admins with at least 1 match; project minimal fields
+        const cursor = users.find(
+            { permission_level: { $ne: 1 }, matches: { $gt: 0 } },
+            { projection: { _id: 0, username: 1, elo: 1, victories: 1, matches: 1 } }
+        ).sort({ elo: -1 }).limit(limit);
+
+        const entries = await cursor.toArray();
+
+        // Return a raw array (keeps the Unity client parsing simple)
+        return res.json(entries);
+    } catch (err) {
+        console.error("[LeaderboardAPI] Error:", err);
+        return res.status(500).json({ error: "Database error" });
+    }
+});
+
 
 
 
