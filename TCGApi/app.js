@@ -802,28 +802,74 @@ app.post('/users/game/activeroom/:userId', async (req, res) => {
 });
 
 
+// ============================================
+// GET /leaderboard/top?limit=100
+// Sort priority: ELO (desc), Winrate (desc), Matches (asc)
+// ============================================
 app.get('/leaderboard/top', async (req, res) => {
     try {
         const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 100, 500));
-        console.log(`[LeaderboardAPI] Fetching top ${limit} players (permission_level = 1)`);
+        console.log(`[LeaderboardAPI] Fetching top ${limit} players (permission_level=1)`);
 
-        // Query: only include permission_level 1
-        const cursor = users.find(
-            { permission_level: 1 },
+        const pipeline = [
+            { $match: { permission_level: 1 } },
+
             {
-                projection: {
+                $project: {
                     _id: 0,
                     username: 1,
-                    elo: 1,
-                    victories: 1,
-                    matches: 1,
-                    permission_level: 1
-                }
-            }
-        ).sort({ elo: -1 }).limit(limit);
+                    elo: { $ifNull: ["$elo", 0] },
+                    victories: { $ifNull: ["$victories", 0] },
+                    defeats: { $ifNull: ["$defeats", 0] },
+                    permission_level: 1,
 
-        const entries = await cursor.toArray();
-        console.log(`[LeaderboardAPI] Found ${entries.length} players`);
+                    // Calculate matches
+                    matches: {
+                        $add: [
+                            { $ifNull: ["$victories", 0] },
+                            { $ifNull: ["$defeats", 0] }
+                        ]
+                    },
+
+                    // Calculate winrate
+                    winrate: {
+                        $cond: [
+                            { $gt: [{ $add: [{ $ifNull: ["$victories", 0] }, { $ifNull: ["$defeats", 0] }] }, 0] },
+                            {
+                                $round: [
+                                    {
+                                        $multiply: [
+                                            {
+                                                $divide: [
+                                                    { $ifNull: ["$victories", 0] },
+                                                    {
+                                                        $add: [
+                                                            { $ifNull: ["$victories", 0] },
+                                                            { $ifNull: ["$defeats", 0] }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            100
+                                        ]
+                                    },
+                                    0
+                                ]
+                            },
+                            0
+                        ]
+                    }
+                }
+            },
+
+            // Sort by ELO ↓, Winrate ↓, Matches ↑
+            { $sort: { elo: -1, winrate: -1, matches: 1 } },
+
+            { $limit: limit }
+        ];
+
+        const entries = await users.aggregate(pipeline).toArray();
+        console.log(`[LeaderboardAPI] Found ${entries.length} entries`);
 
         res.json(entries);
     } catch (err) {
@@ -831,6 +877,7 @@ app.get('/leaderboard/top', async (req, res) => {
         res.status(500).json({ error: "Database error" });
     }
 });
+
 
 
 
