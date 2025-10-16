@@ -879,6 +879,102 @@ app.get('/leaderboard/top', async (req, res) => {
 });
 
 
+// ============================================
+// POST /matches/complete
+// ============================================
+// Body: { tidWinner: "userID_winner", tidLoser: "userID_loser" }
+// Winner: +10 ELO, +1 match, +1 victory
+// Loser : -10 ELO, +1 match, +1 defeat
+// ============================================
+app.post('/matches/complete', async (req, res) => {
+    try {
+        const { tidWinner, tidLoser } = req.body;
+
+        if (!tidWinner || !tidLoser) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing 'tidWinner' or 'tidLoser' field in request body"
+            });
+        }
+
+        // Fetch both players
+        const winner = await users.findOne({ id: tidWinner });
+        const loser = await users.findOne({ id: tidLoser });
+
+        if (!winner || !loser) {
+            return res.status(404).json({
+                success: false,
+                error: "Winner or loser not found"
+            });
+        }
+
+        // --- Constants ---
+        const ELO_GAIN = 10;
+        const ELO_LOSS = -10;
+
+        // --- Update winner ---
+        await users.updateOne(
+            { id: tidWinner },
+            {
+                $inc: {
+                    elo: ELO_GAIN,
+                    matches: 1,
+                    victories: 1
+                },
+                $set: { last_match_at: new Date() }
+            }
+        );
+
+        // --- Update loser ---
+        await users.updateOne(
+            { id: tidLoser },
+            {
+                $inc: {
+                    elo: ELO_LOSS,
+                    matches: 1,
+                    defeats: 1
+                },
+                $set: { last_match_at: new Date() }
+            }
+        );
+
+        // --- Optional: Insert match log ---
+        const matchRecord = {
+            tidWinner,
+            tidLoser,
+            eloChangeWinner: ELO_GAIN,
+            eloChangeLoser: ELO_LOSS,
+            createdAt: new Date()
+        };
+        await database.collection('matches').insertOne(matchRecord);
+
+        console.log(
+            `[MatchComplete] Game complete -> Winner: ${tidWinner} (+${ELO_GAIN}), Loser: ${tidLoser} (${ELO_LOSS})`
+        );
+
+        return res.json({
+            success: true,
+            status: 200,
+            data: {
+                tidWinner,
+                tidLoser,
+                eloGain: ELO_GAIN,
+                eloLoss: ELO_LOSS,
+                updated: true
+            },
+            error: ""
+        });
+    } catch (err) {
+        console.error("[MatchCompleteAPI] Error:", err);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error"
+        });
+    }
+});
+
+
+
 
 
 
