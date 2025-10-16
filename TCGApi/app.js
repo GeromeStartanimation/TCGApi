@@ -882,32 +882,32 @@ app.get('/leaderboard/top', async (req, res) => {
 // ============================================
 // POST /matches/complete
 // ============================================
-// Body: { tidWinner: "userID_winner", tidLoser: "userID_loser" }
+// Body: { unameWinner: "username_winner", unameLoser: "username_loser" }
 // Winner: +10 ELO, +1 match, +1 victory
 // Loser : -10 ELO, +1 match, +1 defeat
 // Clears activeRoomName for both
 // ============================================
 app.post('/matches/complete', async (req, res) => {
     try {
-        const { tidWinner, tidLoser } = req.body;
+        const { unameWinner, unameLoser } = req.body;
 
-        if (!tidWinner || !tidLoser) {
+        if (!unameWinner || !unameLoser) {
             return res.status(400).json({
                 success: false,
-                error: "Missing 'tidWinner' or 'tidLoser' in request body"
+                error: "Missing 'unameWinner' or 'unameLoser' in request body"
             });
         }
 
         console.log(`[MatchCompleteAPI] Incoming:`, req.body);
 
-        // Fetch both players
-        const winner = await users.findOne({ id: tidWinner.toString() });
-        const loser = await users.findOne({ id: tidLoser.toString() });
+        // Find players by username
+        const winner = await users.findOne({ username: unameWinner });
+        const loser = await users.findOne({ username: unameLoser });
 
         if (!winner || !loser) {
             return res.status(404).json({
                 success: false,
-                error: "Winner or loser not found"
+                error: `Winner or loser not found (${unameWinner}, ${unameLoser})`
             });
         }
 
@@ -916,7 +916,7 @@ app.post('/matches/complete', async (req, res) => {
 
         // Update winner
         await users.updateOne(
-            { id: tidWinner.toString() },
+            { username: unameWinner },
             {
                 $inc: { elo: ELO_GAIN, matches: 1, victories: 1 },
                 $set: { last_match_at: new Date(), activeRoomName: "" }
@@ -925,7 +925,7 @@ app.post('/matches/complete', async (req, res) => {
 
         // Update loser
         await users.updateOne(
-            { id: tidLoser.toString() },
+            { username: unameLoser },
             {
                 $inc: { elo: ELO_LOSS, matches: 1, defeats: 1 },
                 $set: { last_match_at: new Date(), activeRoomName: "" }
@@ -934,8 +934,8 @@ app.post('/matches/complete', async (req, res) => {
 
         // Insert match record (optional)
         const matchRecord = {
-            tidWinner,
-            tidLoser,
+            unameWinner,
+            unameLoser,
             eloChangeWinner: ELO_GAIN,
             eloChangeLoser: ELO_LOSS,
             createdAt: new Date()
@@ -943,15 +943,15 @@ app.post('/matches/complete', async (req, res) => {
         await database.collection('matches').insertOne(matchRecord);
 
         console.log(
-            `[MatchCompleteAPI] Winner ${tidWinner} +${ELO_GAIN} | Loser ${tidLoser} ${ELO_LOSS} | Room cleared`
+            `[MatchCompleteAPI] Winner ${unameWinner} +${ELO_GAIN} | Loser ${unameLoser} ${ELO_LOSS} | Room cleared`
         );
 
         return res.json({
             success: true,
             status: 200,
             data: {
-                tidWinner,
-                tidLoser,
+                unameWinner,
+                unameLoser,
                 eloGain: ELO_GAIN,
                 eloLoss: ELO_LOSS,
                 roomCleared: true
@@ -967,6 +967,7 @@ app.post('/matches/complete', async (req, res) => {
         });
     }
 });
+
 
 
 
