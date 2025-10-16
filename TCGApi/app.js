@@ -885,6 +885,7 @@ app.get('/leaderboard/top', async (req, res) => {
 // Body: { tidWinner: "userID_winner", tidLoser: "userID_loser" }
 // Winner: +10 ELO, +1 match, +1 victory
 // Loser : -10 ELO, +1 match, +1 defeat
+// Clears activeRoomName for both
 // ============================================
 app.post('/matches/complete', async (req, res) => {
     try {
@@ -893,13 +894,15 @@ app.post('/matches/complete', async (req, res) => {
         if (!tidWinner || !tidLoser) {
             return res.status(400).json({
                 success: false,
-                error: "Missing 'tidWinner' or 'tidLoser' field in request body"
+                error: "Missing 'tidWinner' or 'tidLoser' in request body"
             });
         }
 
+        console.log(`[MatchCompleteAPI] Incoming:`, req.body);
+
         // Fetch both players
-        const winner = await users.findOne({ id: tidWinner });
-        const loser = await users.findOne({ id: tidLoser });
+        const winner = await users.findOne({ id: tidWinner.toString() });
+        const loser = await users.findOne({ id: tidLoser.toString() });
 
         if (!winner || !loser) {
             return res.status(404).json({
@@ -908,37 +911,28 @@ app.post('/matches/complete', async (req, res) => {
             });
         }
 
-        // --- Constants ---
         const ELO_GAIN = 10;
         const ELO_LOSS = -10;
 
-        // --- Update winner ---
+        // Update winner
         await users.updateOne(
-            { id: tidWinner },
+            { id: tidWinner.toString() },
             {
-                $inc: {
-                    elo: ELO_GAIN,
-                    matches: 1,
-                    victories: 1
-                },
-                $set: { last_match_at: new Date() }
+                $inc: { elo: ELO_GAIN, matches: 1, victories: 1 },
+                $set: { last_match_at: new Date(), activeRoomName: "" }
             }
         );
 
-        // --- Update loser ---
+        // Update loser
         await users.updateOne(
-            { id: tidLoser },
+            { id: tidLoser.toString() },
             {
-                $inc: {
-                    elo: ELO_LOSS,
-                    matches: 1,
-                    defeats: 1
-                },
-                $set: { last_match_at: new Date() }
+                $inc: { elo: ELO_LOSS, matches: 1, defeats: 1 },
+                $set: { last_match_at: new Date(), activeRoomName: "" }
             }
         );
 
-        // --- Optional: Insert match log ---
+        // Insert match record (optional)
         const matchRecord = {
             tidWinner,
             tidLoser,
@@ -949,7 +943,7 @@ app.post('/matches/complete', async (req, res) => {
         await database.collection('matches').insertOne(matchRecord);
 
         console.log(
-            `[MatchComplete] Game complete -> Winner: ${tidWinner} (+${ELO_GAIN}), Loser: ${tidLoser} (${ELO_LOSS})`
+            `[MatchCompleteAPI] Winner ${tidWinner} +${ELO_GAIN} | Loser ${tidLoser} ${ELO_LOSS} | Room cleared`
         );
 
         return res.json({
@@ -960,10 +954,11 @@ app.post('/matches/complete', async (req, res) => {
                 tidLoser,
                 eloGain: ELO_GAIN,
                 eloLoss: ELO_LOSS,
-                updated: true
+                roomCleared: true
             },
             error: ""
         });
+
     } catch (err) {
         console.error("[MatchCompleteAPI] Error:", err);
         res.status(500).json({
@@ -972,6 +967,7 @@ app.post('/matches/complete', async (req, res) => {
         });
     }
 });
+
 
 
 
