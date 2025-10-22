@@ -1074,7 +1074,6 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
     }
 });
 
-});
 
 
 
