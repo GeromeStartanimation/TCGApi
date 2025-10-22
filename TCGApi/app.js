@@ -976,10 +976,14 @@ app.post('/matches/complete', async (req, res) => {
 app.get('/users/achievements/init/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-        const now = new Date();
-        const todayUTC = now.toISOString().split('T')[0]; // "YYYY-MM-DD"
 
-        // 1. Fetch user
+        // === 1. Compute Philippine local date (UTC+8) ===
+        const offsetHours = 8; // Philippines timezone
+        const now = new Date();
+        const phNow = new Date(now.getTime() + offsetHours * 60 * 60 * 1000);
+        const todayPH = phNow.toISOString().split('T')[0]; // "YYYY-MM-DD"
+
+        // === 2. Fetch user ===
         const user = await users.findOne({ id: userId });
         if (!user) {
             return res.status(404).json({
@@ -988,55 +992,55 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
             });
         }
 
-        // 2. Default achievements with embedded trackers
+        // === 3. Default achievement structure with embedded trackers ===
         const defaultAchievements = {
             first_win: { isCompleted: false, dateCompleted: null },
             ten_wins: { isCompleted: false, dateCompleted: null },
             trackers: {
                 dayWins: 0,
-                lastInitDate: todayUTC
+                lastInitDate: todayPH
             }
         };
 
         const updateFields = {};
 
-        // 3. Initialize missing achievements field
+        // === 4. Initialize missing fields ===
         if (!user.achievements) {
             updateFields.achievements = defaultAchievements;
         }
 
-        // 4. Daily reset check using date comparison
         const userAchievements = user.achievements || {};
-        const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayUTC };
+        const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayPH };
 
-        const lastInitDateStr = trackers.lastInitDate || todayUTC;
-        const lastInitDate = new Date(lastInitDateStr + "T00:00:00Z");
-        const todayDate = new Date(todayUTC + "T00:00:00Z");
+        // === 5. Compare PH dates ===
+        const lastInitDateStr = trackers.lastInitDate || todayPH;
+        const lastInitDate = new Date(lastInitDateStr + "T00:00:00+08:00");
+        const todayDate = new Date(todayPH + "T00:00:00+08:00");
 
-        // Compare using > instead of !==
         if (todayDate > lastInitDate) {
+            // ✅ Reset achievements for new PH day
             updateFields.achievements = {
                 first_win: { isCompleted: false, dateCompleted: null },
                 ten_wins: { isCompleted: false, dateCompleted: null },
                 trackers: {
                     dayWins: 0,
-                    lastInitDate: todayUTC
+                    lastInitDate: todayPH
                 }
             };
-            console.log(`[AchievementsInit] New day detected — achievements reset for ${userId}`);
+            console.log(`[AchievementsInit] [PH Time] New day detected (${todayPH}) — reset achievements for ${userId}`);
         } else {
-            console.log(`[AchievementsInit] Same day (${todayUTC}) — no reset needed.`);
+            console.log(`[AchievementsInit] [PH Time] Same day (${todayPH}) — no reset needed.`);
         }
 
-        // 5. Apply any missing or reset fields
+        // === 6. Apply any missing or reset fields ===
         if (Object.keys(updateFields).length > 0) {
             await users.updateOne({ id: userId }, { $set: updateFields });
         }
 
-        // 6. Reload updated user
+        // === 7. Reload updated user ===
         const updatedUser = await users.findOne({ id: userId });
 
-        // 7. Build response array
+        // === 8. Convert achievements to array for Unity ===
         const achievementsArray = Object.entries(updatedUser.achievements)
             .filter(([key]) => key !== "trackers")
             .map(([id, value]) => ({
@@ -1045,12 +1049,12 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
                 dateCompleted: value.dateCompleted
             }));
 
-        // 8. Return formatted response
+        // === 9. Return formatted response ===
         res.json({
             success: true,
             status: 200,
             data: {
-                serverTimeUTC: todayUTC,
+                serverTimeUTC: todayPH, // returns PH date for Unity display
                 achievements: {
                     list: achievementsArray,
                     trackers: updatedUser.achievements.trackers
@@ -1068,6 +1072,8 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
             error: "Database error"
         });
     }
+});
+
 });
 
 
