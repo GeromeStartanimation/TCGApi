@@ -1005,12 +1005,16 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
             updateFields.achievements = defaultAchievements;
         }
 
-        // 4. Daily reset check (inside achievements)
+        // 4. Daily reset check using date comparison
         const userAchievements = user.achievements || {};
         const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayUTC };
 
-        if (trackers.lastInitDate !== todayUTC) {
-            // Reset progress for new day
+        const lastInitDateStr = trackers.lastInitDate || todayUTC;
+        const lastInitDate = new Date(lastInitDateStr + "T00:00:00Z");
+        const todayDate = new Date(todayUTC + "T00:00:00Z");
+
+        // Compare using > instead of !==
+        if (todayDate > lastInitDate) {
             updateFields.achievements = {
                 first_win: { isCompleted: false, dateCompleted: null },
                 ten_wins: { isCompleted: false, dateCompleted: null },
@@ -1019,7 +1023,9 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
                     lastInitDate: todayUTC
                 }
             };
-            console.log(`[AchievementsInit] Daily reset for ${userId}`);
+            console.log(`[AchievementsInit] New day detected — achievements reset for ${userId}`);
+        } else {
+            console.log(`[AchievementsInit] Same day (${todayUTC}) — no reset needed.`);
         }
 
         // 5. Apply any missing or reset fields
@@ -1063,6 +1069,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         });
     }
 });
+
 
 
 
