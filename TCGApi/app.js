@@ -878,7 +878,6 @@ app.get('/leaderboard/top', async (req, res) => {
     }
 });
 
-
 // ============================================
 // POST /matches/complete
 // ============================================
@@ -968,6 +967,81 @@ app.post('/matches/complete', async (req, res) => {
     }
 });
 
+// ============================================
+// GET /users/achievements/init/:userId
+// ============================================
+// Initializes daily achievements if missing,
+// resets dayWins if new date, returns server date (YYYY-MM-DD)
+// ============================================
+app.get('/users/achievements/init/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const now = new Date();
+        const todayUTC = now.toISOString().split('T')[0]; // e.g. "2025-10-22"
+
+        // 1. Fetch user
+        const user = await users.findOne({ id: userId });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found"
+            });
+        }
+
+        // 2. Default achievements (minimal)
+        const defaultAchievements = {
+            first_win: { isCompleted: false, dateCompleted: null },
+            ten_wins: { isCompleted: false, dateCompleted: null }
+        };
+
+        const updateFields = {};
+
+        // 3. Initialize missing fields
+        if (!user.achievements) updateFields.achievements = defaultAchievements;
+        if (typeof user.dayWins !== "number") updateFields.dayWins = 0;
+        if (!user.lastInitDate) updateFields.lastInitDate = todayUTC;
+
+        // 4. Daily reset if new date
+        if (user.lastInitDate !== todayUTC) {
+            updateFields.dayWins = 0;
+            updateFields.achievements = defaultAchievements;
+            updateFields.lastInitDate = todayUTC;
+            console.log(`[AchievementsInit] Daily reset for ${userId}`);
+        }
+
+        // 5. Apply updates if needed
+        if (Object.keys(updateFields).length > 0) {
+            await users.updateOne({ id: userId }, { $set: updateFields });
+        }
+
+        // 6. Return updated state
+        const updatedUser = await users.findOne(
+            { id: userId },
+            { projection: { achievements: 1, dayWins: 1, lastInitDate: 1 } }
+        );
+
+        res.json({
+            success: true,
+            status: 200,
+            data: {
+                serverTimeUTC: todayUTC, // Only date format
+                achievements: updatedUser.achievements || defaultAchievements,
+                dayWins: updatedUser.dayWins ?? 0,
+                lastInitDate: updatedUser.lastInitDate ?? todayUTC
+            },
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[AchievementsInitAPI] Error:", err);
+        res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database error"
+        });
+    }
+});
 
 
 
