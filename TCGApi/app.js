@@ -979,64 +979,76 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         const now = new Date();
         const todayUTC = now.toISOString().split('T')[0]; // "YYYY-MM-DD"
 
+        // 1. Fetch user
         const user = await users.findOne({ id: userId });
         if (!user) {
-            return res.status(404).json({ success: false, error: "User not found" });
+            return res.status(404).json({
+                success: false,
+                error: "User not found"
+            });
         }
 
-        // Default achievements
+        // 2. Default achievements with embedded trackers
         const defaultAchievements = {
             first_win: { isCompleted: false, dateCompleted: null },
-            ten_wins: { isCompleted: false, dateCompleted: null }
+            ten_wins: { isCompleted: false, dateCompleted: null },
+            trackers: {
+                dayWins: 0,
+                lastInitDate: todayUTC
+            }
         };
 
         const updateFields = {};
 
-        // Initialize missing fields
-        if (!user.achievements) updateFields.achievements = defaultAchievements;
-        if (typeof user.dayWins !== "number") updateFields.dayWins = 0;
-        if (!user.lastInitDate) updateFields.lastInitDate = todayUTC;
-
-        // Reset if new day
-        if (user.lastInitDate !== todayUTC) {
+        // 3. Initialize missing achievements field
+        if (!user.achievements) {
             updateFields.achievements = defaultAchievements;
-            updateFields.dayWins = 0;
-            updateFields.lastInitDate = todayUTC;
+        }
+
+        // 4. Daily reset check (inside achievements)
+        const userAchievements = user.achievements || {};
+        const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayUTC };
+
+        if (trackers.lastInitDate !== todayUTC) {
+            // Reset progress for new day
+            updateFields.achievements = {
+                first_win: { isCompleted: false, dateCompleted: null },
+                ten_wins: { isCompleted: false, dateCompleted: null },
+                trackers: {
+                    dayWins: 0,
+                    lastInitDate: todayUTC
+                }
+            };
             console.log(`[AchievementsInit] Daily reset for ${userId}`);
         }
 
-        // Apply updates
+        // 5. Apply any missing or reset fields
         if (Object.keys(updateFields).length > 0) {
             await users.updateOne({ id: userId }, { $set: updateFields });
         }
 
-        // Re-fetch user data
-        const updatedUser = await users.findOne(
-            { id: userId },
-            { projection: { achievements: 1, dayWins: 1, lastInitDate: 1 } }
-        );
+        // 6. Reload updated user
+        const updatedUser = await users.findOne({ id: userId });
 
-        // Convert object to array
-        const achievementsArray = Object.entries(updatedUser.achievements || defaultAchievements)
+        // 7. Build response array
+        const achievementsArray = Object.entries(updatedUser.achievements)
+            .filter(([key]) => key !== "trackers")
             .map(([id, value]) => ({
                 id,
                 isCompleted: value.isCompleted,
                 dateCompleted: value.dateCompleted
             }));
 
-        //  Structure it so trackers are INSIDE achievements
+        // 8. Return formatted response
         res.json({
             success: true,
             status: 200,
             data: {
+                serverTimeUTC: todayUTC,
                 achievements: {
-                    trackers: {
-                        dayWins: updatedUser.dayWins ?? 0,
-                        lastInitDate: updatedUser.lastInitDate ?? todayUTC
-                    },
-                    list: achievementsArray
-                },
-                serverTimeUTC: todayUTC
+                    list: achievementsArray,
+                    trackers: updatedUser.achievements.trackers
+                }
             },
             error: ""
         });
@@ -1051,6 +1063,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         });
     }
 });
+
 
 
 
