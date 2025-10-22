@@ -977,9 +977,9 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
         const now = new Date();
-        const todayUTC = now.toISOString().split('T')[0]; // e.g. "2025-10-22"
+        const todayUTC = now.toISOString().split('T')[0]; // "YYYY-MM-DD"
 
-        // 1. Fetch user
+        // 1. Find user
         const user = await users.findOne({ id: userId });
         if (!user) {
             return res.status(404).json({
@@ -988,7 +988,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
             });
         }
 
-        // 2. Default achievements (minimal)
+        // 2. Define default achievements (object form in DB)
         const defaultAchievements = {
             first_win: { isCompleted: false, dateCompleted: null },
             ten_wins: { isCompleted: false, dateCompleted: null }
@@ -996,38 +996,49 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
 
         const updateFields = {};
 
-        // 3. Initialize missing fields
+        // 3. Initialize fields if missing
         if (!user.achievements) updateFields.achievements = defaultAchievements;
         if (typeof user.dayWins !== "number") updateFields.dayWins = 0;
         if (!user.lastInitDate) updateFields.lastInitDate = todayUTC;
 
-        // 4. Daily reset if new date
+        // 4. Reset if new day
         if (user.lastInitDate !== todayUTC) {
-            updateFields.dayWins = 0;
             updateFields.achievements = defaultAchievements;
+            updateFields.dayWins = 0;
             updateFields.lastInitDate = todayUTC;
             console.log(`[AchievementsInit] Daily reset for ${userId}`);
         }
 
-        // 5. Apply updates if needed
+        // 5. Apply updates
         if (Object.keys(updateFields).length > 0) {
             await users.updateOne({ id: userId }, { $set: updateFields });
         }
 
-        // 6. Return updated state
+        // 6. Re-fetch updated data
         const updatedUser = await users.findOne(
             { id: userId },
             { projection: { achievements: 1, dayWins: 1, lastInitDate: 1 } }
         );
 
+        // 7. Convert achievements object to array for Unity
+        const achievementsArray = Object.entries(updatedUser.achievements || defaultAchievements)
+            .map(([id, value]) => ({
+                id,
+                isCompleted: value.isCompleted,
+                dateCompleted: value.dateCompleted
+            }));
+
+        // 8. Return formatted response
         res.json({
             success: true,
             status: 200,
             data: {
-                serverTimeUTC: todayUTC, // Only date format
-                achievements: updatedUser.achievements || defaultAchievements,
-                dayWins: updatedUser.dayWins ?? 0,
-                lastInitDate: updatedUser.lastInitDate ?? todayUTC
+                trackers: {
+                    dayWins: updatedUser.dayWins ?? 0,
+                    lastInitDate: updatedUser.lastInitDate ?? todayUTC
+                },
+                achievements: achievementsArray,
+                serverTimeUTC: todayUTC
             },
             error: ""
         });
@@ -1042,6 +1053,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         });
     }
 });
+
 
 
 
