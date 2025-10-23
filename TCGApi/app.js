@@ -1081,6 +1081,95 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
     }
 });
 
+// ============================================
+// POST /users/achievements/addtracker/:userId
+// ============================================
+// Body: { trackerType: "dayWins", amount: 1 }
+// Increments the tracker, updates all subscribed achievements,
+// and returns their current progress + completion states.
+// ============================================
+app.post('/users/achievements/addtracker/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const { trackerType, amount } = req.body;
+
+        const amt = Number(amount);
+        if (!trackerType || isNaN(amt)) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing or invalid 'trackerType' or 'amount'"
+            });
+        }
+
+        // 1. Fetch user
+        const user = await users.findOne({ id: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+
+        // 2. Ensure achievements and trackers exist
+        const achievements = user.achievements || {};
+        const trackers = achievements.trackers || {};
+
+        // Increment the specific tracker
+        trackers[trackerType] = (trackers[trackerType] || 0) + amt;
+        console.log(`[AddTracker] ${userId} +${amt} on tracker '${trackerType}' → now ${trackers[trackerType]}`);
+
+        const updatedAchievements = [];
+
+        // 3. Loop through achievements and update all that subscribe to this tracker
+        for (const [id, ach] of Object.entries(achievements)) {
+            if (id === "trackers") continue;
+            if (ach.tracker === trackerType) {
+                const progressTarget = Number(ach.progressTarget) || 1;
+                ach.progressCurrent = trackers[trackerType];
+
+                if (ach.progressCurrent >= progressTarget) {
+                    ach.progressCurrent = progressTarget;
+                    ach.isCompleted = true;
+                    ach.dateCompleted = ach.dateCompleted || new Date().toISOString();
+                } else {
+                    ach.isCompleted = false;
+                }
+
+                achievements[id] = ach;
+
+                updatedAchievements.push({
+                    id,
+                    tracker: trackerType,
+                    currentProgress: ach.progressCurrent,
+                    progressTarget,
+                    isCompleted: ach.isCompleted,
+                    dateCompleted: ach.dateCompleted
+                });
+            }
+        }
+
+        // 4. Save all updates
+        achievements.trackers = trackers;
+        await users.updateOne({ id: userId }, { $set: { achievements } });
+
+        // 5. Return updated achievements
+        return res.json({
+            success: true,
+            status: 200,
+            data: {
+                trackerType,
+                trackerValue: trackers[trackerType],
+                updatedAchievements
+            },
+            error: ""
+        });
+    } catch (err) {
+        console.error("[AddTrackerAPI] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database error"
+        });
+    }
+});
 
 
 
