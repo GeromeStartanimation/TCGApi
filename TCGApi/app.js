@@ -1077,13 +1077,14 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
 // ============================================
 // POST /users/achievements/addprogress/:userId
 // ============================================
-// Body: { achievementId: "first_win", amount: 1 }
-// Updates progress and returns updated achievement JSON
+// Body: { achievementId: "first_win", amount: 1, progressTarget: 10 }
+// The client sends the target; server updates progress and checks completion.
+// Returns: achievementId, currentProgress, isCompleted
 // ============================================
 app.post('/users/achievements/addprogress/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
-        const { achievementId, amount } = req.body;
+        const { achievementId, amount, progressTarget } = req.body;
 
         if (!achievementId || typeof amount !== 'number') {
             return res.status(400).json({
@@ -1092,53 +1093,49 @@ app.post('/users/achievements/addprogress/:userId', async (req, res) => {
             });
         }
 
+        // Fetch user
         const user = await users.findOne({ id: userId });
         if (!user) {
             return res.status(404).json({ success: false, error: "User not found" });
         }
 
         const achievements = user.achievements || {};
-        const trackers = achievements.trackers || { dayWins: 0, lastInitDate: null };
 
-        // === Locate the matching achievement ===
-        const target = achievements[achievementId];
-        if (!target) {
-            return res.status(404).json({
-                success: false,
-                error: `Achievement '${achievementId}' not found`
-            });
-        }
+        // Find or initialize target achievement
+        const target = achievements[achievementId] || {
+            progressCurrent: 0,
+            isCompleted: false,
+            dateCompleted: null
+        };
 
-        // === Update progress ===
-        const current = Number(target.progressCurrent ?? 0);
-        const targetGoal = Number(target.progressTarget ?? 1);
-        const newProgress = current + amount;
+        // Increment progress
+        target.progressCurrent = (target.progressCurrent || 0) + amount;
 
-        target.progressCurrent = newProgress;
+        // Completion check based on client-sent target
+        const targetGoal = Number(progressTarget) || 1;
+        let isCompleted = target.progressCurrent >= targetGoal;
 
-        if (newProgress >= targetGoal) {
-            target.progressCurrent = targetGoal;
+        if (isCompleted) {
             target.isCompleted = true;
-            target.dateCompleted = new Date().toISOString();
+            target.progressCurrent = targetGoal; // clamp
+            target.dateCompleted = target.dateCompleted || new Date().toISOString();
+        } else {
+            target.isCompleted = false;
         }
 
         achievements[achievementId] = target;
-        achievements.trackers = trackers;
 
-        // === Save ===
+        // Save
         await users.updateOne({ id: userId }, { $set: { achievements } });
 
-        // === Return current achievement JSON ===
+        // Return minimal payload
         return res.json({
             success: true,
             status: 200,
             data: {
                 achievementId,
                 currentProgress: target.progressCurrent,
-                progressTarget: target.progressTarget,
-                isCompleted: target.isCompleted,
-                dateCompleted: target.dateCompleted,
-                trackers
+                isCompleted: target.isCompleted
             },
             error: ""
         });
@@ -1153,6 +1150,7 @@ app.post('/users/achievements/addprogress/:userId', async (req, res) => {
         });
     }
 });
+
 
 
 
