@@ -967,6 +967,7 @@ app.post('/matches/complete', async (req, res) => {
     }
 });
 
+
 // ============================================
 // GET /users/achievements/init/:userId
 // ============================================
@@ -978,7 +979,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         const userId = req.params.userId;
 
         // === 1. Compute Philippine local date (UTC+8) ===
-        const offsetHours = 8; // Philippines timezone
+        const offsetHours = 8;
         const now = new Date();
         const phNow = new Date(now.getTime() + offsetHours * 60 * 60 * 1000);
         const todayPH = phNow.toISOString().split('T')[0]; // "YYYY-MM-DD"
@@ -992,10 +993,22 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
             });
         }
 
-        // === 3. Default achievement structure with embedded trackers ===
+        // === 3. Default achievements with tracker references ===
         const defaultAchievements = {
-            first_win: { isCompleted: false, dateCompleted: null },
-            ten_wins: { isCompleted: false, dateCompleted: null },
+            first_win: {
+                tracker: "dayWins",
+                progressCurrent: 0,
+                progressTarget: 1,
+                isCompleted: false,
+                dateCompleted: null
+            },
+            ten_wins: {
+                tracker: "dayWins",
+                progressCurrent: 0,
+                progressTarget: 10,
+                isCompleted: false,
+                dateCompleted: null
+            },
             trackers: {
                 dayWins: 0,
                 lastInitDate: todayPH
@@ -1003,8 +1016,6 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         };
 
         const updateFields = {};
-
-        // === 4. Initialize missing fields ===
         if (!user.achievements) {
             updateFields.achievements = defaultAchievements;
         }
@@ -1012,49 +1023,45 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         const userAchievements = user.achievements || {};
         const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayPH };
 
-        // === 5. Compare PH dates ===
+        // === 4. Reset daily data if a new day is detected ===
         const lastInitDateStr = trackers.lastInitDate || todayPH;
         const lastInitDate = new Date(lastInitDateStr + "T00:00:00+08:00");
         const todayDate = new Date(todayPH + "T00:00:00+08:00");
 
         if (todayDate > lastInitDate) {
-            // ✅ Reset achievements for new PH day
-            updateFields.achievements = {
-                first_win: { isCompleted: false, dateCompleted: null },
-                ten_wins: { isCompleted: false, dateCompleted: null },
-                trackers: {
-                    dayWins: 0,
-                    lastInitDate: todayPH
-                }
-            };
+            // Reset daily achievements
+            updateFields.achievements = defaultAchievements;
             console.log(`[AchievementsInit] [PH Time] New day detected (${todayPH}) — reset achievements for ${userId}`);
         } else {
             console.log(`[AchievementsInit] [PH Time] Same day (${todayPH}) — no reset needed.`);
         }
 
-        // === 6. Apply any missing or reset fields ===
+        // === 5. Apply any missing or reset fields ===
         if (Object.keys(updateFields).length > 0) {
             await users.updateOne({ id: userId }, { $set: updateFields });
         }
 
-        // === 7. Reload updated user ===
+        // === 6. Reload updated user ===
         const updatedUser = await users.findOne({ id: userId });
 
-        // === 8. Convert achievements to array for Unity ===
+        // === 7. Convert achievements to array for Unity ===
         const achievementsArray = Object.entries(updatedUser.achievements)
             .filter(([key]) => key !== "trackers")
             .map(([id, value]) => ({
                 id,
+                tracker: value.tracker || null,
+                progressCurrent: value.progressCurrent || 0,
+                progressTarget: value.progressTarget || 1,
                 isCompleted: value.isCompleted,
                 dateCompleted: value.dateCompleted
             }));
 
-        // === 9. Return formatted response ===
+        // === 8. Return formatted response ===
         res.json({
             success: true,
             status: 200,
             data: {
-                serverTimeUTC: todayPH, // returns PH date for Unity display
+                serverTimeUTC: todayPH,
                 achievements: {
                     list: achievementsArray,
                     trackers: updatedUser.achievements.trackers
@@ -1074,82 +1081,8 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
     }
 });
 
-// ============================================
-// POST /users/achievements/addprogress/:userId
-// ============================================
-// Body: { achievementId: "first_win", amount: 1, progressTarget: 10 }
-// The client sends the target; server updates progress and checks completion.
-// Returns: achievementId, currentProgress, isCompleted
-// ============================================
-app.post('/users/achievements/addprogress/:userId', async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        const { achievementId, amount, progressTarget } = req.body;
 
-        if (!achievementId || typeof amount !== 'number') {
-            return res.status(400).json({
-                success: false,
-                error: "Missing or invalid 'achievementId' or 'amount'"
-            });
-        }
 
-        // Fetch user
-        const user = await users.findOne({ id: userId });
-        if (!user) {
-            return res.status(404).json({ success: false, error: "User not found" });
-        }
-
-        const achievements = user.achievements || {};
-
-        // Find or initialize target achievement
-        const target = achievements[achievementId] || {
-            progressCurrent: 0,
-            isCompleted: false,
-            dateCompleted: null
-        };
-
-        // Increment progress
-        target.progressCurrent = (target.progressCurrent || 0) + amount;
-
-        // Completion check based on client-sent target
-        const targetGoal = Number(progressTarget) || 1;
-        let isCompleted = target.progressCurrent >= targetGoal;
-
-        if (isCompleted) {
-            target.isCompleted = true;
-            target.progressCurrent = targetGoal; // clamp
-            target.dateCompleted = target.dateCompleted || new Date().toISOString();
-        } else {
-            target.isCompleted = false;
-        }
-
-        achievements[achievementId] = target;
-
-        // Save
-        await users.updateOne({ id: userId }, { $set: { achievements } });
-
-        // Return minimal payload
-        return res.json({
-            success: true,
-            status: 200,
-            data: {
-                achievementId,
-                currentProgress: target.progressCurrent,
-                isCompleted: target.isCompleted
-            },
-            error: ""
-        });
-
-    } catch (err) {
-        console.error("[AchievementsAddProgressAPI] Error:", err);
-        return res.status(500).json({
-            success: false,
-            status: 500,
-            data: "",
-            error: "Database error"
-        });
-    }
-});
 
 
 
