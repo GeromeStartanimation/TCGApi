@@ -1074,6 +1074,86 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
     }
 });
 
+// ============================================
+// POST /users/achievements/addprogress/:userId
+// ============================================
+// Body: { achievementId: "first_win", amount: 1 }
+// Updates progress and returns updated achievement JSON
+// ============================================
+app.post('/users/achievements/addprogress/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const { achievementId, amount } = req.body;
+
+        if (!achievementId || typeof amount !== 'number') {
+            return res.status(400).json({
+                success: false,
+                error: "Missing or invalid 'achievementId' or 'amount'"
+            });
+        }
+
+        const user = await users.findOne({ id: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+
+        const achievements = user.achievements || {};
+        const trackers = achievements.trackers || { dayWins: 0, lastInitDate: null };
+
+        // === Locate the matching achievement ===
+        const target = achievements[achievementId];
+        if (!target) {
+            return res.status(404).json({
+                success: false,
+                error: `Achievement '${achievementId}' not found`
+            });
+        }
+
+        // === Update progress ===
+        const current = Number(target.progressCurrent ?? 0);
+        const targetGoal = Number(target.progressTarget ?? 1);
+        const newProgress = current + amount;
+
+        target.progressCurrent = newProgress;
+
+        if (newProgress >= targetGoal) {
+            target.progressCurrent = targetGoal;
+            target.isCompleted = true;
+            target.dateCompleted = new Date().toISOString();
+        }
+
+        achievements[achievementId] = target;
+        achievements.trackers = trackers;
+
+        // === Save ===
+        await users.updateOne({ id: userId }, { $set: { achievements } });
+
+        // === Return current achievement JSON ===
+        return res.json({
+            success: true,
+            status: 200,
+            data: {
+                achievementId,
+                currentProgress: target.progressCurrent,
+                progressTarget: target.progressTarget,
+                isCompleted: target.isCompleted,
+                dateCompleted: target.dateCompleted,
+                trackers
+            },
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[AchievementsAddProgressAPI] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database error"
+        });
+    }
+});
+
 
 
 
