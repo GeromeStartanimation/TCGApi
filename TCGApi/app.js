@@ -888,7 +888,7 @@ app.get('/leaderboard/top', async (req, res) => {
 // ============================================
 app.post('/matches/complete', async (req, res) => {
     try {
-        const { unameWinner, unameLoser, gameMode } = req.body;
+        const { unameWinner, unameLoser, game_mode } = req.body;
 
         if (!unameWinner || !unameLoser) {
             return res.status(400).json({
