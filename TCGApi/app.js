@@ -888,7 +888,7 @@ app.get('/leaderboard/top', async (req, res) => {
 // ============================================
 app.post('/matches/complete', async (req, res) => {
     try {
-        const { unameWinner, unameLoser } = req.body;
+        const { unameWinner, unameLoser, gameMode } = req.body;
 
         if (!unameWinner || !unameLoser) {
             return res.status(400).json({
@@ -910,6 +910,30 @@ app.post('/matches/complete', async (req, res) => {
             });
         }
 
+        // If not ranked -> just clear active room names
+        if (!gameMode || gameMode.toLowerCase() !== "ranked") {
+            await users.updateMany(
+                { id: { $in: [winner.id, loser.id] } },
+                { $set: { activeRoomName: "" } }
+            );
+
+            console.log(`[MatchCompleteAPI] Non-ranked match (${gameMode}). Only cleared room names.`);
+
+            return res.json({
+                success: true,
+                status: 200,
+                data: {
+                    unameWinner,
+                    unameLoser,
+                    gameMode,
+                    roomCleared: true,
+                    ranked: false
+                },
+                error: ""
+            });
+        }
+
+        // --- Ranked match ---
         const ELO_GAIN = 10;
         const ELO_LOSS = -10;
 
@@ -929,18 +953,19 @@ app.post('/matches/complete', async (req, res) => {
             }
         );
 
-        // Insert match record (optional)
+        // Insert ranked match record
         const matchRecord = {
             unameWinner,
             unameLoser,
             eloChangeWinner: ELO_GAIN,
             eloChangeLoser: ELO_LOSS,
+            gameMode: gameMode || "ranked",
             createdAt: new Date()
         };
         await database.collection('matches').insertOne(matchRecord);
 
         console.log(
-            `[MatchCompleteAPI] Winner ${unameWinner} +${ELO_GAIN} | Loser ${unameLoser} ${ELO_LOSS} | Room cleared`
+            `[MatchCompleteAPI] Ranked match complete | Winner ${unameWinner} +${ELO_GAIN} | Loser ${unameLoser} ${ELO_LOSS} | Room cleared`
         );
 
         return res.json({
@@ -951,6 +976,8 @@ app.post('/matches/complete', async (req, res) => {
                 unameLoser,
                 eloGain: ELO_GAIN,
                 eloLoss: ELO_LOSS,
+                gameMode,
+                ranked: true,
                 roomCleared: true
             },
             error: ""
@@ -964,6 +991,7 @@ app.post('/matches/complete', async (req, res) => {
         });
     }
 });
+
 
 
 // ============================================
