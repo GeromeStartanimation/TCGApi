@@ -913,18 +913,16 @@ app.post('/matches/complete', async (req, res) => {
         const ELO_GAIN = 10;
         const ELO_LOSS = -10;
 
-        // Update winner
         await users.updateOne(
-            { username: unameWinner },
+            { id: winner.id },
             {
                 $inc: { elo: ELO_GAIN, matches: 1, victories: 1 },
                 $set: { last_match_at: new Date(), activeRoomName: "" }
             }
         );
 
-        // Update loser
         await users.updateOne(
-            { username: unameLoser },
+            { id: loser.id },
             {
                 $inc: { elo: ELO_LOSS, matches: 1, defeats: 1 },
                 $set: { last_match_at: new Date(), activeRoomName: "" }
