@@ -911,13 +911,13 @@ app.post('/matches/complete', async (req, res) => {
         }
 
         // If not ranked -> just clear active room names
-        if (!gameMode || gameMode.toLowerCase() !== "ranked") {
+        if (!game_mode || game_mode.toLowerCase() !== "ranked") {
             await users.updateMany(
                 { id: { $in: [winner.id, loser.id] } },
                 { $set: { activeRoomName: "" } }
             );
 
-            console.log(`[MatchCompleteAPI] Non-ranked match (${gameMode}). Only cleared room names.`);
+            console.log(`[MatchCompleteAPI] Non-ranked match (${game_mode}). Only cleared room names.`);
 
             return res.json({
                 success: true,
@@ -925,7 +925,7 @@ app.post('/matches/complete', async (req, res) => {
                 data: {
                     unameWinner,
                     unameLoser,
-                    gameMode,
+                    game_mode,
                     roomCleared: true,
                     ranked: false
                 },
@@ -959,7 +959,7 @@ app.post('/matches/complete', async (req, res) => {
             unameLoser,
             eloChangeWinner: ELO_GAIN,
             eloChangeLoser: ELO_LOSS,
-            gameMode: gameMode || "ranked",
+            gameMode: game_mode || "ranked",
             createdAt: new Date()
         };
         await database.collection('matches').insertOne(matchRecord);
@@ -976,7 +976,7 @@ app.post('/matches/complete', async (req, res) => {
                 unameLoser,
                 eloGain: ELO_GAIN,
                 eloLoss: ELO_LOSS,
-                gameMode,
+                game_mode,
                 ranked: true,
                 roomCleared: true
             },
