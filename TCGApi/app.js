@@ -995,14 +995,24 @@ app.post('/matches/complete', async (req, res) => {
 
 
 // ============================================
-// GET /users/achievements/init/:userId
+// POST /users/achievements/init/:userId
 // ============================================
-// Initializes daily achievements if missing,
-// resets dayWins if new date, returns server date (YYYY-MM-DD)
+// Body: { achievements: [{ id, tracker, progressTarget }] }
+// - Accepts client-side definitions
+// - Initializes or merges with stored achievements
+// - Resets trackers if it's a new PH day
 // ============================================
-app.get('/users/achievements/init/:userId', async (req, res) => {
+app.post('/users/achievements/init/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
+        const { achievements } = req.body;
+
+        if (!Array.isArray(achievements) || achievements.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing or invalid 'achievements' array in request body"
+            });
+        }
 
         // === 1. Compute Philippine local date (UTC+8) ===
         const offsetHours = 8;
@@ -1013,76 +1023,61 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         // === 2. Fetch user ===
         const user = await users.findOne({ id: userId });
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: "User not found"
-            });
+            return res.status(404).json({ success: false, error: "User not found" });
         }
-
-        // === 3. Default achievements with tracker references ===
-        const defaultAchievements = {
-            first_win: {
-                tracker: "dayWins",
-                progressCurrent: 0,
-                progressTarget: 1,
-                isCompleted: false,
-                dateCompleted: null
-            },
-            ten_wins: {
-                tracker: "dayWins",
-                progressCurrent: 0,
-                progressTarget: 10,
-                isCompleted: false,
-                dateCompleted: null
-            },
-            trackers: {
-                dayWins: 0,
-                lastInitDate: todayPH
-            }
-        };
 
         const updateFields = {};
-        if (!user.achievements) {
-            updateFields.achievements = defaultAchievements;
-        }
-
         const userAchievements = user.achievements || {};
         const trackers = userAchievements.trackers || { dayWins: 0, lastInitDate: todayPH };
 
-        // === 4. Reset daily data if a new day is detected ===
+        // === 3. Check for new day ===
         const lastInitDateStr = trackers.lastInitDate || todayPH;
         const lastInitDate = new Date(lastInitDateStr + "T00:00:00+08:00");
         const todayDate = new Date(todayPH + "T00:00:00+08:00");
 
-        if (todayDate > lastInitDate) {
-            // Reset daily achievements
-            updateFields.achievements = defaultAchievements;
-            console.log(`[AchievementsInit] [PH Time] New day detected (${todayPH}) — reset achievements for ${userId}`);
-        } else {
-            console.log(`[AchievementsInit] [PH Time] Same day (${todayPH}) — no reset needed.`);
+        const resetDay = todayDate > lastInitDate;
+        if (resetDay) {
+            console.log(`[AchievementsInit] New day detected (${todayPH}) — resetting daily trackers.`);
+            trackers.dayWins = 0;
+            trackers.lastInitDate = todayPH;
         }
 
-        // === 5. Apply any missing or reset fields ===
-        if (Object.keys(updateFields).length > 0) {
-            await users.updateOne({ id: userId }, { $set: updateFields });
+        // === 4. Merge client-defined achievements ===
+        const merged = {};
+        for (const a of achievements) {
+            if (!a.id) continue;
+            const existing = userAchievements[a.id] || {};
+            merged[a.id] = {
+                tracker: a.tracker,
+                progressCurrent: resetDay ? 0 : (existing.progressCurrent || 0),
+                progressTarget: a.progressTarget,
+                isCompleted: resetDay ? false : (existing.isCompleted || false),
+                dateCompleted: resetDay ? null : (existing.dateCompleted || null)
+            };
         }
 
-        // === 6. Reload updated user ===
+        merged.trackers = trackers;
+        updateFields.achievements = merged;
+
+        // === 5. Save merged structure ===
+        await users.updateOne({ id: userId }, { $set: updateFields });
+
+        // === 6. Reload to confirm ===
         const updatedUser = await users.findOne({ id: userId });
 
-        // === 7. Convert achievements to array for Unity ===
+        // === 7. Convert to array for Unity ===
         const achievementsArray = Object.entries(updatedUser.achievements)
             .filter(([key]) => key !== "trackers")
             .map(([id, value]) => ({
                 id,
-                tracker: value.tracker || null,
-                progressCurrent: value.progressCurrent || 0,
-                progressTarget: value.progressTarget || 1,
+                tracker: value.tracker,
+                progressCurrent: value.progressCurrent,
+                progressTarget: value.progressTarget,
                 isCompleted: value.isCompleted,
                 dateCompleted: value.dateCompleted
             }));
 
-        // === 8. Return formatted response ===
+        // === 8. Send back ===
         res.json({
             success: true,
             status: 200,
@@ -1106,6 +1101,7 @@ app.get('/users/achievements/init/:userId', async (req, res) => {
         });
     }
 });
+
 
 // ============================================
 // POST /users/achievements/addtracker/:userId
