@@ -1113,8 +1113,6 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
     }
 });
 
-
-
 // ============================================
 // POST /users/achievements/addtracker/:userId
 // ============================================
@@ -1205,6 +1203,107 @@ app.post('/users/achievements/addtracker/:userId', async (req, res) => {
     }
 });
 
+// ============================================
+// POST /users/achievements/claim/:userId
+// ============================================
+// Body: { achievementId, rewards: [{ rewardType, rewardAmount }] }
+// - Validates if the achievement exists and is completed
+// - Uses the /users/rewards/gain/:userId route internally to grant rewards
+// - Marks the achievement as claimed in the user's DB
+// ============================================
+app.post('/users/achievements/claim/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const { achievementId, rewards } = req.body;
+
+        if (!achievementId || !Array.isArray(rewards)) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing 'achievementId' or invalid 'rewards' array in body"
+            });
+        }
+
+        // 1. Fetch the user and their achievements
+        const user = await users.findOne({ id: userId });
+        if (!user) {
+            return res.status(404).json({ success: false, error: "User not found" });
+        }
+
+        const achievements = user.achievements || {};
+        const target = achievements[achievementId];
+        if (!target) {
+            return res.status(404).json({ success: false, error: "Achievement not found" });
+        }
+
+        // 2. Validate that the achievement is completed but not yet claimed
+        if (!target.isCompleted) {
+            return res.status(400).json({ success: false, error: "Achievement not yet completed" });
+        }
+
+        if (target.isClaimed) {
+            return res.status(409).json({ success: false, error: "Achievement already claimed" });
+        }
+
+        console.log(`[ClaimAchievementAPI] User ${userId} claiming rewards for ${achievementId}`);
+
+        // 3. Loop through each reward and call /users/rewards/gain/:userId internally
+        const grantedRewards = [];
+        for (const reward of rewards) {
+            const { rewardType, rewardAmount } = reward;
+
+            const rewardPayload = {
+                type: rewardType.toLowerCase(),  // coin, deck, pack, etc.
+                quantity: rewardAmount,
+                flag: `achievement_${achievementId}`
+            };
+
+            const rewardResponse = await fetch(`http://localhost:${port}/users/rewards/gain/${userId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(rewardPayload)
+            });
+
+            const rewardData = await rewardResponse.json();
+
+            if (!rewardResponse.ok || !rewardData.success) {
+                console.error(`[ClaimAchievementAPI] Failed to grant ${rewardType} x${rewardAmount}:`, rewardData.error);
+                continue;
+            }
+
+            grantedRewards.push({ rewardType, rewardAmount });
+        }
+
+        // 4. Mark achievement as claimed
+        target.isClaimed = true;
+        achievements[achievementId] = target;
+
+        await users.updateOne(
+            { id: userId },
+            { $set: { achievements } }
+        );
+
+        // 5. Respond with summary
+        return res.json({
+            success: true,
+            status: 200,
+            data: {
+                achievementId,
+                grantedRewards,
+                message: `Achievement '${achievementId}' successfully claimed`
+            },
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[ClaimAchievementAPI] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database or reward processing error"
+        });
+    }
+});
 
 
 
