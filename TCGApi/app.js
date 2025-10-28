@@ -1002,6 +1002,14 @@ app.post('/matches/complete', async (req, res) => {
 // - Initializes or merges with stored achievements
 // - Resets trackers if it's a new PH day
 // ============================================
+// ============================================
+// POST /users/achievements/init/:userId
+// ============================================
+// Body: { achievements: [{ id, tracker, progressTarget, isRepeatable }] }
+// - Accepts client-side definitions
+// - Initializes or merges with stored achievements
+// - Resets trackers if it's a new PH day or repeatable achievement was claimed
+// ============================================
 app.post('/users/achievements/init/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
@@ -1018,7 +1026,7 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
         const offsetHours = 8;
         const now = new Date();
         const phNow = new Date(now.getTime() + offsetHours * 60 * 60 * 1000);
-        const todayPH = phNow.toISOString().split('T')[0]; // "YYYY-MM-DD"
+        const todayPH = phNow.toISOString().split('T')[0];
 
         // === 2. Fetch user ===
         const user = await users.findOne({ id: userId });
@@ -1034,8 +1042,8 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
         const lastInitDateStr = trackers.lastInitDate || todayPH;
         const lastInitDate = new Date(lastInitDateStr + "T00:00:00+08:00");
         const todayDate = new Date(todayPH + "T00:00:00+08:00");
-
         const resetDay = todayDate > lastInitDate;
+
         if (resetDay) {
             console.log(`[AchievementsInit] New day detected (${todayPH}) — resetting daily trackers.`);
             trackers.dayWins = 0;
@@ -1047,25 +1055,27 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
         for (const a of achievements) {
             if (!a.id) continue;
             const existing = userAchievements[a.id] || {};
+
+            const shouldRefresh =
+                (a.isRepeatable && existing.isCompleted && existing.isClaimed) || resetDay;
+
             merged[a.id] = {
                 tracker: a.tracker,
-                progressCurrent: resetDay ? 0 : (existing.progressCurrent || 0),
+                progressCurrent: shouldRefresh ? 0 : (existing.progressCurrent || 0),
                 progressTarget: a.progressTarget,
-                isCompleted: resetDay ? false : (existing.isCompleted || false),
-                dateCompleted: resetDay ? null : (existing.dateCompleted || null)
+                isCompleted: shouldRefresh ? false : (existing.isCompleted || false),
+                isClaimed: shouldRefresh ? false : (existing.isClaimed || false),
+                isRepeatable: a.isRepeatable || false,
+                dateCompleted: shouldRefresh ? null : (existing.dateCompleted || null)
             };
         }
 
         merged.trackers = trackers;
         updateFields.achievements = merged;
 
-        // === 5. Save merged structure ===
         await users.updateOne({ id: userId }, { $set: updateFields });
-
-        // === 6. Reload to confirm ===
         const updatedUser = await users.findOne({ id: userId });
 
-        // === 7. Convert to array for Unity ===
         const achievementsArray = Object.entries(updatedUser.achievements)
             .filter(([key]) => key !== "trackers")
             .map(([id, value]) => ({
@@ -1074,10 +1084,11 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
                 progressCurrent: value.progressCurrent,
                 progressTarget: value.progressTarget,
                 isCompleted: value.isCompleted,
+                isClaimed: value.isClaimed,
+                isRepeatable: value.isRepeatable,
                 dateCompleted: value.dateCompleted
             }));
 
-        // === 8. Send back ===
         res.json({
             success: true,
             status: 200,
@@ -1101,6 +1112,7 @@ app.post('/users/achievements/init/:userId', async (req, res) => {
         });
     }
 });
+
 
 
 // ============================================
