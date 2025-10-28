@@ -882,6 +882,9 @@ app.get('/leaderboard/top', async (req, res) => {
 // Loser : -10 ELO, +1 match, +1 defeat
 // Clears activeRoomName for both
 // ============================================
+// ============================================
+// POST /matches/complete
+// ============================================
 app.post('/matches/complete', async (req, res) => {
     try {
         const { unameWinner, unameLoser, game_mode } = req.body;
@@ -906,15 +909,30 @@ app.post('/matches/complete', async (req, res) => {
             });
         }
 
-        // If not ranked -> just clear active room names
+        // --- Increment daily tracker (regardless of mode)
+        try {
+            const trackerEndpoint = `http://localhost:${port}/users/achievements/addtracker/${winner.id}`;
+            const trackerPayload = { trackerType: "dayWins", amount: 1 };
+
+            await fetch(trackerEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(trackerPayload)
+            });
+
+            console.log(`[MatchCompleteAPI] Added +1 to dayWins for ${winner.username}`);
+        } catch (err) {
+            console.error(`[MatchCompleteAPI] Failed to update dayWins for ${winner.username}:`, err);
+        }
+
+        // === Non-ranked match ===
         if (!game_mode || game_mode.toLowerCase() !== "ranked") {
             await users.updateMany(
                 { id: { $in: [winner.id, loser.id] } },
                 { $set: { activeRoomName: "" } }
             );
 
-            console.log(`[MatchCompleteAPI] Non-ranked match (${game_mode}). Only cleared room names.`);
-
+            console.log(`[MatchCompleteAPI] Non-ranked match (${game_mode}). Cleared room names.`);
             return res.json({
                 success: true,
                 status: 200,
@@ -922,14 +940,14 @@ app.post('/matches/complete', async (req, res) => {
                     unameWinner,
                     unameLoser,
                     game_mode,
-                    roomCleared: true,
-                    ranked: false
+                    ranked: false,
+                    roomCleared: true
                 },
                 error: ""
             });
         }
 
-        // --- Ranked match ---
+        // === Ranked match ===
         const ELO_GAIN = 10;
         const ELO_LOSS = -10;
 
@@ -949,7 +967,6 @@ app.post('/matches/complete', async (req, res) => {
             }
         );
 
-        // Insert ranked match record
         const matchRecord = {
             unameWinner,
             unameLoser,
@@ -960,9 +977,7 @@ app.post('/matches/complete', async (req, res) => {
         };
         await database.collection('matches').insertOne(matchRecord);
 
-        console.log(
-            `[MatchCompleteAPI] Ranked match complete | Winner ${unameWinner} +${ELO_GAIN} | Loser ${unameLoser} ${ELO_LOSS} | Room cleared`
-        );
+        console.log(`[MatchCompleteAPI] Ranked match complete | Winner ${unameWinner} +${ELO_GAIN} | Loser ${unameLoser} ${ELO_LOSS} | Room cleared`);
 
         return res.json({
             success: true,
@@ -978,7 +993,6 @@ app.post('/matches/complete', async (req, res) => {
             },
             error: ""
         });
-
     } catch (err) {
         console.error("[MatchCompleteAPI] Error:", err);
         res.status(500).json({
@@ -987,6 +1001,7 @@ app.post('/matches/complete', async (req, res) => {
         });
     }
 });
+
 
 
 
