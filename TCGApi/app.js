@@ -1249,7 +1249,7 @@ app.post('/users/achievements/claim/:userId', async (req, res) => {
             const payload = {
                 type: rewardType.toLowerCase(),
                 quantity: rewardAmount,
-                flag: `achievement_${achievementId}`,
+                flag: "",
                 json: ""
             };
 
