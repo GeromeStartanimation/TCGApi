@@ -151,11 +151,21 @@ function startWebSocket(server, options = {}) {
             if (data.eventName === "identify" && data.username) {
                 const username = String(data.username);
                 const prevStatus = (userStatuses.get(username) || "offline").toLowerCase();
+                const forceReplace = !!data.forceReplace;
 
                 let set = clientsByUsername.get(username);
                 if (!set) { set = new Set(); clientsByUsername.set(username, set); }
                 set.add(ws);
                 ws.username = username;
+
+                //forceReplace logic
+                if (forceReplace) {
+                    const others = Array.from(set).filter(s => s !== ws);
+                    if (others.length > 0) {
+                        console.log(`[DualLogin] [ForceReplace] ${username} requested replacement. Kicking ${others.length} session(s).`);
+                        for (const old of others) notifyAndClose(old, 'replaced_by_new_login_online', 4003);
+                    }
+                }
 
                 const action = enforceSecondLoginPolicy(username, ws, prevStatus);
                 if (action.action === 'reject_new') {
