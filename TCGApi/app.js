@@ -86,6 +86,7 @@ app.post('/users/edit/:userID', async (request, response) => {
         const updateFields = {};
         if (avatar) updateFields.avatar = avatar;
         if (cardback) updateFields.cardback = cardback;
+        if (banner) updateFields.banner = banner;
 
         if (Object.keys(updateFields).length === 0) {
             return response.status(400).json({
