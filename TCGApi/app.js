@@ -78,7 +78,7 @@ app.post('/users/edit/:userID', async (request, response) => {
     try {
 
         const userID = request.params.userID;
-        let { avatar, cardback } = request.body; // edit user avatar or cardback
+        let { avatar, cardback, banner } = request.body;
 
         console.log("Editing " + userID + "properties");
 
