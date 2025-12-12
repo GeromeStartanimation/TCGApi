@@ -21,58 +21,89 @@ const product = database.collection('price_list');
 const { notifyPaymentSuccess, notifyPaymentProcess } = require('./ws-server');
 
 
-app.get('/users/:username', async (request, response) => {
-
-    try {
-
-        const username = request.params.username;
-        await ReadUser(response, username);
+async function ensureUser(doc) {
+    if (!doc || !doc.id) {
+        throw new Error("Missing user id");
     }
 
-    catch (error) {
+    const now = new Date();
 
-        console.log(error.message);
+    const result = await users.findOneAndUpdate(
+        { id: doc.id },                    // UNIQUE key
+        {
+            $setOnInsert: {
+                ...doc,
+                createdAt: now
+            },
+            $set: {
+                updatedAt: now
+            }
+        },
+        {
+            upsert: true,                  // create if missing
+            returnDocument: "after"        // return final document
+        }
+    );
 
-        response.json({
+    return result.value;
+}
 
+app.post("/users/create", async (req, res) => {
+    try {
+        // Atomic: create if missing, otherwise return existing
+        const user = await ensureUser(req.body);
+
+        // Old Unity clients expect raw user JSON
+        return res.status(200).json(user);
+    }
+    catch (e) {
+        // Race condition fallback (unique index protection)
+        if (e && e.code === 11000) {
+            const existing = await users.findOne({ id: req.body.id });
+            return res.status(200).json(existing);
+        }
+
+        console.error("[USERS CREATE] Error:", e);
+
+        // IMPORTANT: still return a response so client doesn't hang
+        return res.status(500).json({
             success: false,
             status: 500,
             data: "",
             error: "Database Error"
         });
     }
+});
 
-})
 
-app.post('/users/create', async (request, response) => {
-
+app.post("/users/create", async (req, res) => {
     try {
+        // This will CREATE if missing or RETURN existing if already created
+        const user = await ensureUser(req.body);
 
-        const json = request.body;
-
-        console.log('[UserCreateAPI] Body:', request.body);
-
-        const doc = json;
-
-        const result = await users.insertOne(doc);
-
-        response.json(doc);
+        // Keep response simple so old Unity code keeps working
+        return res.status(200).json(user);
     }
+    catch (e) {
+        // If two requests race, Mongo throws duplicate key error (11000)
+        // We catch it and return the already-created user instead
+        if (e && e.code === 11000) {
+            const existing = await users.findOne({ id: req.body.id });
+            return res.status(200).json(existing);
+        }
 
-    catch (error) {
+        console.error("[USERS CREATE] Error:", e);
 
-        console.log(error.message);
-
-        response.status(500).json({
-
+        return res.status(500).json({
             success: false,
             status: 500,
             data: "",
             error: "Database Error"
         });
     }
+});
 
-})
+
 
 app.post('/users/edit/:userID', async (request, response) => {
     try {

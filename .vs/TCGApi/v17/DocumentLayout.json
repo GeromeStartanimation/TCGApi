@@ -3,12 +3,12 @@
   "WorkspaceRootPath": "D:\\Unity Projects\\Github\\TCGApi\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|d:\\unity projects\\github\\tcgapi\\tcgapi\\ws-server.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
-      "RelativeMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|solutionrelative:tcgapi\\ws-server.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|d:\\unity projects\\github\\tcgapi\\tcgapi\\app.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
       "RelativeMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|solutionrelative:tcgapi\\app.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|d:\\unity projects\\github\\tcgapi\\tcgapi\\ws-server.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
+      "RelativeMoniker": "D:0:0:{31637F11-228C-4A33-BFB1-1223BFC66206}|TCGApi\\TCGApi.esproj|solutionrelative:tcgapi\\ws-server.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
     }
   ],
   "DocumentGroupContainers": [
@@ -18,30 +18,29 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 1,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "ws-server.js",
               "DocumentMoniker": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\ws-server.js",
               "RelativeDocumentMoniker": "TCGApi\\ws-server.js",
               "ToolTip": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\ws-server.js",
               "RelativeToolTip": "TCGApi\\ws-server.js",
-              "ViewState": "AgIAAIsAAAAAAAAAAAAAAJ8AAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAEEAAAAAAAAAAAAQwJ8AAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
-              "WhenOpened": "2025-10-08T03:15:56.099Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-10-08T03:15:56.099Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
               "Title": "app.js",
               "DocumentMoniker": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\app.js",
               "RelativeDocumentMoniker": "TCGApi\\app.js",
               "ToolTip": "D:\\Unity Projects\\Github\\TCGApi\\TCGApi\\app.js",
               "RelativeToolTip": "TCGApi\\app.js",
-              "ViewState": "AgIAABIAAAAAAAAAAAAAAHcDAAAbAAAAAAAAAA==",
+              "ViewState": "AgIAANQAAAAAAAAAAAAAAEwAAAAIAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
               "WhenOpened": "2025-10-08T01:57:54.593Z",
               "EditorCaption": ""
