@@ -45,34 +45,38 @@ app.get('/users/:username', async (request, response) => {
 })
 
 app.post('/users/create', async (request, response) => {
-
     try {
+        const doc = request.body;
 
-        const json = request.body;
+        console.log('[UserCreateAPI] Body:', doc);
 
-        console.log('[UserCreateAPI] Body:', request.body);
+        // DUPLICATE CHECK
+        const existingUser = await users.findOne({ username: doc.username });
+        if (existingUser) {
+            return response.status(409).json({
+                success: false,
+                status: 409,
+                data: "",
+                error: "Account already exists"
+            });
+        }
 
-        const doc = json;
-
-        const result = await users.insertOne(doc);
+        await users.insertOne(doc);
 
         response.json(doc);
     }
-
     catch (error) {
-
         console.log(error.message);
 
         response.status(500).json({
-
             success: false,
             status: 500,
             data: "",
             error: "Database Error"
         });
     }
+});
 
-})
 
 app.post('/users/edit/:userID', async (request, response) => {
     try {
