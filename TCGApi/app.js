@@ -819,6 +819,7 @@ app.get('/leaderboard/top', async (req, res) => {
                 $project: {
                     _id: 0,
                     username: 1,
+                    avatar: { $ifNull: ["$avatar", ""] },
                     elo: { $ifNull: ["$elo", 0] },
                     victories: { $ifNull: ["$victories", 0] },
                     defeats: { $ifNull: ["$defeats", 0] },
