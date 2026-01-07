@@ -121,6 +121,42 @@ app.get('/users/id/:userId', async (req, res) => {
     }
 });
 
+// GET /users/id/:userId/username
+app.get('/users/id/:userId/username', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+
+        const user = await users.findOne(
+            { id: userId },
+            { projection: { _id: 0, username: 1 } }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                status: 404,
+                data: "",
+                error: "User not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            status: 200,
+            data: user.username,
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[GetUsernameById] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database Error"
+        });
+    }
+});
 
 
 app.post('/users/create', async (request, response) => {
