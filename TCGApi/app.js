@@ -44,6 +44,85 @@ app.get('/users/:username', async (request, response) => {
 
 })
 
+// ============================================
+// GET /users/id/:userId/data
+// Returns full user data by external ID
+// ============================================
+app.get('/users/id/:userId/data', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+
+        const user = await users.findOne({ id: userId });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                status: 404,
+                data: "",
+                error: "No User Found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            status: 200,
+            data: user,
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[LoadUserByIdAPI] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database Error"
+        });
+    }
+});
+
+// ============================================
+// GET /users/id/:userId
+// Checks if user exists and returns username
+// ============================================
+app.get('/users/id/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+
+        const user = await users.findOne(
+            { id: userId },
+            { projection: { username: 1 } } // only fetch username
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                status: 404,
+                data: "",
+                error: "User not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            status: 200,
+            data: user.username || "",
+            error: ""
+        });
+
+    } catch (err) {
+        console.error("[CheckUserByIdAPI] Error:", err);
+        return res.status(500).json({
+            success: false,
+            status: 500,
+            data: "",
+            error: "Database Error"
+        });
+    }
+});
+
+
+
 app.post('/users/create', async (request, response) => {
     try {
         const doc = request.body;
